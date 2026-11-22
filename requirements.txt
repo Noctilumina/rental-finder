@@ -1,0 +1,16 @@
+numpy
+scipy
+shapely>=2.0
+pyproj
+osmium>=4.0
+pandas
+requests
+fastapi
+uvicorn
+psutil
+# optional: the older Overpass-based map build (pipeline/walk.py) and the browser-based adapters
+osmnx>=2.0
+geopandas
+networkx
+playwright
+beautifulsoup4

@@ -1,0 +1,11 @@
+# Generated and downloaded data (rebuild with the Data screen or the commands in README.md)
+data/
+
+# Personal: EP-Online API key
+ep-online-key.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rental finder</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10l9-7 9 7v10a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>
+    <span>Rental finder</span>
+  </div>
+  <nav>
+    <a href="#map" data-view="map">Map</a>
+    <a href="#listings" data-view="listings">Listings</a>
+    <a href="#municipalities" data-view="municipalities">Municipalities</a>
+    <a href="#data" data-view="data">Data</a>
+  </nav>
+  <span id="updated" class="muted small"></span>
+  <button id="refreshListingsTop" class="btn">Refresh listings</button>
+</header>
+
+<div class="actionbar" id="actionBar" hidden></div>
+
+<!-- MAP VIEW -->
+<section id="view-map" class="view">
+  <aside class="criteria" id="criteria">
+    <section class="card">
+      <h2>Criteria</h2>
+      <div class="slider">
+        <label for="walk"><span>Max walk time to station</span><b id="walkOut"></b></label>
+        <input id="walk" type="range" min="5" max="60" step="1">
+      </div>
+      <div class="sub">
+        <button class="subhead" id="otherToggle" aria-expanded="true"><span>Other travel times</span><span id="otherChevron">▴</span></button>
+        <div id="otherBody">
+          <div class="slider hoverable" id="shopRow" tabindex="0">
+            <label for="shop"><span class="dotted">Walk to supermarket</span><b id="shopOut"></b></label>
+            <input id="shop" type="range" min="2" max="30" step="1">
+            <div class="popover" id="shopPop" role="tooltip" hidden></div>
+          </div>
+          <div class="slider hoverable" id="parkRow" tabindex="0">
+            <label for="park"><span class="dotted">Walk to a park</span><b id="parkOut"></b></label>
+            <input id="park" type="range" min="2" max="30" step="1">
+            <div class="popover" id="parkPop" role="tooltip" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="slider">
+        <label for="train"><span>Max train time to Den Bosch</span><b id="trainOut"></b></label>
+        <input id="train" type="range" min="5" max="60" step="1">
+        <span class="hint">Typical off-peak trip to Den Bosch CS or Oost, both directions</span>
+      </div>
+      <label class="check"><input type="checkbox" id="direct"> Direct trains only</label>
+    </section>
+
+    <section class="card">
+      <h2>Travel times shown</h2>
+      <div class="seg" role="group" aria-label="Destination">
+        <button data-dest="cs">Den Bosch CS</button>
+        <button data-dest="lg">Lucas Gasselstraat 2</button>
+      </div>
+      <label class="check small" id="lastRow" style="justify-content:space-between;color:var(--muted)">Last stretch
+        <select id="lastMode" style="width:auto"><option value="bike">Bike</option><option value="walk">Walk</option></select></label>
+      <span class="hint" id="lastHint"></span>
+      <div class="seg small" role="group" aria-label="Day">
+        <button data-day="wk">Weekday</button>
+        <button data-day="sa">Saturday</button>
+        <button data-day="su">Sunday</button>
+      </div>
+      <div class="slider">
+        <label for="hour"><span>Leaving at</span><b id="hourOut"></b></label>
+        <input id="hour" type="range" min="6" max="24" step="1">
+        <span class="hint" id="periodOut"></span>
+      </div>
+      <span class="hint">Door to door: walk, average wait for the next train, ride, and the last stretch. The quickest of Den Bosch CS, Oost and Rosmalen is used, or going straight there when that's quicker.</span>
+    </section>
+
+    <section class="card layers">
+      <h2>Show on map</h2>
+      <label class="check"><input type="checkbox" id="lyrAreas" checked> Qualifying areas</label>
+      <label class="check" style="padding-left:24px"><input type="checkbox" id="lyrHeat"> Colour by door-to-door time</label>
+      <label class="check"><input type="checkbox" id="lyrStations" checked> Stations</label>
+      <label class="check"><input type="checkbox" id="lyrShops"> Supermarkets</label>
+      <label class="check"><input type="checkbox" id="lyrParks"> Parks</label>
+      <label class="check"><input type="checkbox" id="lyrListings" checked> Listings</label>
+      <span class="hint" id="areaStats"></span>
+    </section>
+  </aside>
+
+  <main class="mapwrap">
+    <div id="map"></div>
+    <button class="edge left" id="toggleLeft" aria-label="Hide the criteria panel" title="Hide or show the criteria">‹</button>
+    <button class="edge right" id="toggleRight" aria-label="Hide the listing panel" title="Hide or show the listings">›</button>
+    <div class="detailcard" id="detailCard" hidden></div>
+    <div class="heretip" id="hereTip" hidden></div>
+    <div class="legend" id="legend"></div>
+  </main>
+
+  <aside class="listpanel" id="listPanel">
+    <button class="grip" id="grip" aria-label="Resize the listing panel: drag, or use the arrow keys" title="Drag to resize"><span></span></button>
+    <div class="listhead">
+      <h2 id="listCount">Listings</h2>
+      <div class="sortwrap">
+        <button class="btn" id="sortBtn" aria-haspopup="menu" aria-expanded="false"></button>
+        <div class="menu" id="sortMenu" role="menu" hidden></div>
+      </div>
+    </div>
+    <div class="row small" id="listTabs"></div>
+    <span class="hint" id="filterNote" hidden></span>
+    <span class="hint" id="groupNote" hidden>Showing one group from the map · <a href="#" id="clearGroup">Show all</a></span>
+    <section class="card quick" id="quickFilters" hidden></section>
+    <div class="cards" id="cards"></div>
+    <a href="#listings" class="center small">Open full table</a>
+  </aside>
+</section>
+
+<!-- LISTINGS VIEW -->
+<section id="view-listings" class="view page" hidden>
+  <div class="pagehead">
+    <h1 id="tableTitle">Listings</h1>
+    <div class="row">
+      <span class="muted small" id="tableCriteria"></span>
+      <button class="btn" id="exportCsv">Export CSV</button>
+    </div>
+  </div>
+  <section class="card filters" id="fullFilters"></section>
+  <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
+  <p class="hint">Ads of the same home (same address and size, or the same spot with the same size and rent) appear once; each source links to its ad. Tick "Show duplicate ads" to see them separately. "Listed" is the site's date, or when this app first saw the home.</p>
+</section>
+
+<!-- MUNICIPALITIES VIEW -->
+<section id="view-municipalities" class="view page" hidden></section>
+
+<!-- DETAIL VIEW -->
+<section id="view-detail" class="view page" hidden></section>
+
+<!-- DATA VIEW -->
+<section id="view-data" class="view page" hidden>
+  <div class="grid2">
+    <section class="card">
+      <div class="cardhead"><h2>Listings</h2><span class="muted small" id="dsListUpdated"></span></div>
+      <p class="muted small">Searches each rental site in the towns around the stations, keeps homes inside the widest areas, reads each new ad's page, merges duplicates and re-checks homes that disappeared. Takes up to an hour or two.</p>
+      <div id="dsSources" class="kv"></div>
+      <button class="btn primary" id="refreshListings">Refresh listings</button>
+    </section>
+    <section class="card" id="energyCard">
+      <div class="cardhead"><h2>Energy labels</h2></div>
+      <p class="muted small">Official labels from EP-Online (RVO), looked up per address. Needs a free API key; it's saved only on this computer (ep-online-key.txt).</p>
+      <div class="help" id="keyHelp">
+        <b class="small">How to get a key</b>
+        <ol>
+          <li>Open <a href="https://apikey.ep-online.nl/" target="_blank" rel="noopener">apikey.ep-online.nl</a> (the form is in Dutch).</li>
+          <li><b>Naam organisatie</b>: leave empty or fill in your name. <b>Type organisatie</b>: choose <i>Overig, geen organisatie</i>. <b>KvK-nummer</b>: leave empty. <b>E-mailadres</b>: your email.</li>
+          <li>Tick <i>Ik ga akkoord met de voorwaarden</i> (accept the terms) and press <i>API-key aanvragen</i>.</li>
+          <li>Within 24 hours, click the activation link in the email. The page that opens shows your key <b>only once</b>: copy it.</li>
+          <li>Paste it below and press <b>Save key</b>. A new key starts working about 5 minutes after you receive it; then press <b>Look up energy labels now</b>.</li>
+        </ol>
+      </div>
+      <label class="field" for="epKey">API key
+        <span class="keyrow"><input type="password" id="epKey" placeholder="Paste your EP-Online API key" autocomplete="off" spellcheck="false"><button class="btn" id="saveKey">Save key</button></span></label>
+      <span class="small" id="keyStatus"></span>
+      <div class="row"><button class="btn primary" id="lookupEnergy">Get energy labels for all listings</button>
+        <span class="small muted" id="energyHint">Looks up (or re-checks) every listing you have now. Refresh listings also does this for new homes.</span></div>
+    </section>
+    <section class="card">
+      <div class="cardhead"><h2>Map and timetable</h2><span class="muted small" id="dsMapBuilt"></span></div>
+      <p class="muted small">Streets, paths, supermarkets, parks, busy roads and railways from OpenStreetMap (Geofabrik extracts), the national train timetable, and neighbourhood figures (Leefbaarometer, CBS). Rebuild when the timetable changes; takes a few minutes.</p>
+      <div id="dsMap" class="kv"></div>
+      <button class="btn" id="rebuildMap">Rebuild map data</button>
+    </section>
+  </div>
+  <section class="card" id="travelCard">
+    <div class="cardhead"><h2>Your travel times</h2><button class="btn" id="resetTravel">Reset to computed times</button></div>
+    <p class="muted small">The last stretch to Lucas Gasselstraat 2 from each arrival station, and your speeds for going straight there from home. Computed from the route distance at the speeds below; change any of them if you're quicker or slower.</p>
+    <div class="travelgrid">
+      <table class="pts" id="legTable"><thead><tr><th>From</th><th>Distance</th><th>Bike (min)</th><th>Walk (min)</th></tr></thead><tbody></tbody></table>
+      <div class="speeds" id="speeds"></div>
+    </div>
+    <span class="small muted" id="travelStatus"></span>
+  </section>
+  <section class="card" id="weightsCard">
+    <div class="cardhead"><h2>What matters to you</h2>
+      <span class="row" style="gap:8px"><button class="btn" id="undoWeights" disabled>Undo</button><button class="btn" id="resetWeights" disabled>Reset to defaults</button></span></div>
+    <p class="muted small">How much each part counts in a home's overall score. 0 leaves a part out; the parts' own 0–10 scores don't change. Hover a name for how it's worked out.</p>
+    <div class="weights" id="weights"></div>
+    <span class="small muted" id="weightsStatus"></span>
+  </section>
+  <section class="card">
+    <div class="cardhead"><h2>Last run</h2><span class="muted small" id="jobState"></span></div>
+    <pre id="jobLog" class="log"></pre>
+  </section>
+</section>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
