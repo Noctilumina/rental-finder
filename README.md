@@ -10,8 +10,15 @@ Runs on Windows, Linux and macOS (tested automatically on Ubuntu and macOS, see 
 - **Windows:** double-click `start.cmd`.
 - **Linux / macOS:** run `./start.sh` in this folder.
 
-Both start the server and open http://127.0.0.1:8765 in your browser. Stop it by closing the window (Windows) or
+Both start the server and open http://127.0.0.1:8765 in your browser (if the app is already running, they just open it). Stop it by closing the window (Windows) or
 with Ctrl+C. Use **Refresh listings** (top right, or the Data screen) to fetch new listings.
+
+**Handy keys:** `/` jumps to the map search (postcode, street or town), `Esc` closes cards and the walking view,
+`↑`/`↓` move through the list and `Enter` opens a home. Hiding, statuses and the shortlist can be undone from the
+message that appears at the bottom.
+
+**Moving to another computer:** Data screen → *Your data* → **Export** saves your stars, statuses, notes, weights,
+travel times and current home in one file; **Import** on the other computer brings them back.
 
 ## Setup (once, on a new machine)
 

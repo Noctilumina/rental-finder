@@ -27,7 +27,7 @@ try {
 const save = () => { try { localStorage.setItem('rf-state', JSON.stringify(S)); } catch { /* private mode */ } };
 
 let STATIONS = [], HOURS = [], META = {}, BYCODE = {}, QUAL = new Set(), LISTINGS = [], SHOPS = [], SHOP_COUNTS = {};
-let PARKS = null, LAST_REFRESH = null, SCORE_INFO = {}, BANDS = [];
+let PARKS = null, LAST_REFRESH = null, LAST_NEW = null, SCORE_INFO = {}, BANDS = [];
 let CURRENT = null;  // your current home: {home, score, travel} from /api/home, or null
 let HOVER = null; // {kind, id} currently previewed on the map
 let GROUP = null;  // ids of a clicked group of pins: the list shows only these until you click elsewhere
@@ -220,6 +220,25 @@ const metaLine = l => [l.type, l.m2 && l.m2 + ' m²', l.rooms ? l.rooms + (l.roo
   ppm2(l) && '€' + ppm2(l).toFixed(1) + '/m²', ppr(l) && fmtEur(ppr(l)) + '/room', l.energyLabel && 'label ' + l.energyLabel, INTERIOR[l.interior]].filter(Boolean).join(' · ');
 const starBtn = l => `<button class="starbtn${user(l).star ? ' on' : ''}" data-star="${esc(l.homeId || l.id)}" aria-pressed="${!!user(l).star}" title="${user(l).star ? 'Remove from shortlist' : 'Add to shortlist'}">${user(l).star ? '★' : '☆'}</button>`;
 
+// ---------- toasts: short messages, with Undo where something can be taken back ----------
+function toast(msg, undo, ms = 6000) {
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.innerHTML = `<span>${msg}</span>${undo ? '<button class="toastbtn">Undo</button>' : ''}<button class="toastx" aria-label="Dismiss">×</button>`;
+  const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 200); };
+  el.querySelector('.toastx').onclick = close;
+  if (undo) el.querySelector('.toastbtn').onclick = () => { close(); undo(); };
+  $('#toasts').append(el);
+  setTimeout(close, ms);
+}
+/** Change your own state for a home and offer Undo. */
+async function changeUser(hid, patch, what) {
+  const l = LISTINGS.find(x => (x.homeId || x.id) === hid);
+  const before = { ...(user(l || {}) || {}) };
+  await setUser(hid, patch);
+  const prev = { star: !!before.star, status: before.status || '', hidden: !!before.hidden };
+  toast(esc(what), () => setUser(hid, prev));
+}
 async function setUser(hid, patch) {
   const r = await fetch('/api/user/' + encodeURIComponent(hid), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
   const u = await r.json();
@@ -229,7 +248,8 @@ async function setUser(hid, patch) {
 }
 
 // ---------- map ----------
-const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([51.69, 5.3], 10);
+const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView(S.view ? [S.view[0], S.view[1]] : [51.69, 5.3], S.view ? S.view[2] : 10);
+map.on('moveend', () => { const c = map.getCenter(); S.view = [+c.lat.toFixed(5), +c.lng.toFixed(5), map.getZoom()]; save(); });  // back where you were next time
 L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
@@ -254,7 +274,7 @@ const shopLayer = L.layerGroup();
 const parkLayer = L.geoJSON(null, { pane: 'parks', style: { color: '#3F7D20', weight: 1, fillColor: '#5FA83A', fillOpacity: 0.35 },
   onEachFeature: (f, layer) => layer.bindTooltip(`${esc(f.properties.name || 'Park')} · ${f.properties.ha} ha`) });
 const pinLayer = (L.markerClusterGroup ? L.markerClusterGroup({ maxClusterRadius: 40, disableClusteringAtZoom: 15, showCoverageOnHover: false, zoomToBoundsOnClick: false }) : L.layerGroup()).addTo(map);
-let fitted = false;
+let fitted = !!S.view;  // only fit to the areas the very first time
 const groupIds = e => e.layer.getAllChildMarkers().map(m => m.options.lid);
 // With a side panel open the map is small: stations and groups open on click (single homes still on hover).
 // With both panels hidden, everything previews on hover.
@@ -423,7 +443,12 @@ async function saveHome() {
 $('#saveHome').addEventListener('click', saveHome);
 for (const id of ['#hPostcode', '#hNumber', '#hRent', '#hM2', '#hRooms']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') saveHome(); });
 $('#clearHome').addEventListener('click', async () => {
+  const old = CURRENT?.home;
   await fetch('/api/home', { method: 'DELETE' });
+  if (old) toast('Current home removed', async () => {
+    await fetch('/api/home', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postcode: old.postcode, number: old.number, rent: old.rent, m2: old.m2, rooms: old.rooms, energyLabel: old.energySource === 'you' ? old.energyLabel : '' }) });
+    renderHomeCard.filled = false; await boot(true); renderHomeCard();
+  });
   for (const id of ['#hPostcode', '#hNumber', '#hRent', '#hM2', '#hRooms']) $(id).value = '';
   $('#hLabel').value = '';
   renderHomeCard.filled = false;
@@ -629,6 +654,7 @@ async function loadAreas(listings = true) {
   if (l) {
     LISTINGS = l.items;
     LAST_REFRESH = l.lastRefresh?.at || l.updated;
+    LAST_NEW = l.lastRefresh?.new ?? null;
     SCORE_INFO = l.scoreInfo || {};
     $('#updated').textContent = l.updated ? `Listings updated ${relTime(l.updated)}` : 'No listings fetched yet';
   }
@@ -734,7 +760,7 @@ function renderCards() {
   if (renderCards.lastGroup !== GROUP) { renderCards.lastGroup = GROUP; fade($('#cards')); }
   const rank = new Map(all.map((l, i) => [l.id, i]));
   $('#cards').innerHTML = list.length ? list.slice(0, 400).map(l => cardHtml(l, rank.get(l.id))).join('') + (list.length > 400 ? `<div class="empty">Showing the first 400 of ${list.length}. Narrow the filters or open the full table.</div>` : '') :
-    `<div class="empty">${LISTINGS.length ? 'No listings match these filters.' : 'No listings inside these areas yet. Press “Refresh listings” to search the rental sites.'}</div>`;
+    `<div class="empty">${emptyText()}</div>`;
 }
 
 // ---------- hover / pinned card on the map ----------
@@ -889,8 +915,14 @@ function tableRows() {
     return (x > y ? 1 : x < y ? -1 : 0) * (S.tableSort.asc ? 1 : -1);
   });
 }
+function listTabsHtml() {
+  const stars = LISTINGS.filter(l => user(l).star).length;
+  return [['active', 'All'], ['star', `★ Shortlist (${stars})`], ['status', 'With status'], ['hidden', 'Hidden']]
+    .map(([k, t]) => `<button class="chip${S.f.list === k ? ' on' : ''}" data-list="${k}">${t}</button>`).join('');
+}
 function renderTable() {
   const rows = tableRows();
+  $('#tableTabs').innerHTML = listTabsHtml();
   $('#tableTitle').textContent = `${rows.length} listings inside the qualifying areas`;
   $('#tableCriteria').innerHTML = `Walk ≤ ${S.walk} min · supermarket ≤ ${S.shop} min${S.park < PARK_ANY ? ` · park ≤ ${S.park} min` : ''} · ${S.direct ? 'direct ' : ''}train ≤ ${S.train} min off-peak · <a href="#map">change on map</a>`;
   $('#table thead').innerHTML = '<tr>' + COLS.map(([k, label]) => {
@@ -1205,10 +1237,11 @@ let statusTimer;
 async function renderData() {
   const s = await fetch('/api/status').then(r => r.json());
   const meta = s.meta || {}, lst = s.listings;
+  renderData.everRefreshed = !!lst.updated;
   $('#dsListUpdated').textContent = lst.updated ? 'Updated ' + relTime(lst.updated) : 'Never run';
   const en = lst.energy || {};
   $('#dsSources').innerHTML = Object.entries(lst.sources || {}).map(([site, v]) =>
-    `<div><span>${esc(site)}</span><span class="${v.ok ? 'ok' : 'bad'}">${v.ok ? `${v.found} found · ${v.kept ?? 0} in areas` : esc(v.error || "failed")}</span></div>`).join('')
+    `<div><span>${esc(site)}</span><span class="${v.ok ? 'ok' : 'bad'}">${v.ok ? `✓ ${v.found} found · ${v.kept ?? 0} in areas` : '✕ ' + esc(v.error || "failed")}</span></div>`).join('')
     + `<div><span>Homes stored</span><b>${lst.total}</b></div><div><span>Inside the current areas</span><b>${LISTINGS.length}</b></div>
        <div><span>Energy labels</span><span>${en.epOnline != null ? `${en.epOnline} official, ${en.fromText} from listing texts` : '—'}</span></div>`;
   $('#keyStatus').innerHTML = s.energyKey ? '<span class="ok">✓ Key saved.</span> Paste a new one to replace it.'
@@ -1240,7 +1273,14 @@ async function renderData() {
   renderJobButton(j, running);
   clearTimeout(statusTimer);
   if (running) { renderData.sawRunning = true; statusTimer = setTimeout(renderData, 3000); }
-  else if (j.finished && renderData.sawRunning) { renderData.sawRunning = false; MUNI = null; await boot(true); }  // a job just ended: load its results
+  else if (j.finished && renderData.sawRunning) {  // a job just ended: load its results and say so
+    renderData.sawRunning = false; MUNI = null; await boot(true);
+    const what = j.name === 'map' ? 'Map data rebuilt' : j.name === 'energy' ? 'Energy labels updated' : 'Listing refresh finished';
+    const msg = j.code === 0 ? what + (j.name === 'listings' && LAST_NEW != null ? ` · ${LAST_NEW} new homes` : '') : `${what.replace(/ (finished|rebuilt|updated)$/, '')} stopped early: see the log on the Data screen`;
+    toast(esc(msg), null, 10000);
+    try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('Rental finder', { body: msg }); } catch { /* not available */ }
+  }
+  document.title = running ? `${Math.round(((j.progress || progressFromLog(j))?.overall ?? 0) * 100)}% · Rental finder` : 'Rental finder';
 }
 /** The top-right button doubles as a progress bar while any job runs: what it's doing, how far, and roughly how long. */
 /** Progress read from the log lines, for jobs that don't report it themselves (e.g. started by older code). */
@@ -1279,7 +1319,8 @@ function renderJobButton(j, running) {
 }
 async function startJob(name) {
   const r = await fetch('/api/refresh/' + name, { method: 'POST' });
-  if (!r.ok) alert((await r.json()).detail || 'Could not start');
+  if (!r.ok) { toast(esc((await r.json().catch(() => ({}))).detail || 'Could not start')); return renderData(); }
+  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch { /* not available */ }
   renderData();
 }
 
@@ -1325,7 +1366,7 @@ document.addEventListener('click', e => {
   const t = e.target.closest('button, a, [data-listing]');
   if (!e.target.closest('.gmwrap')) $$('.gmmenu').forEach(m => m.hidden = true);
   if (!t) { $('#sortMenu').hidden = true; return; }
-  if (t.dataset.star) { e.preventDefault(); e.stopPropagation(); const l = LISTINGS.find(x => (x.homeId || x.id) === t.dataset.star); setUser(t.dataset.star, { star: !user(l || {}).star }); return; }
+  if (t.dataset.star) { e.preventDefault(); e.stopPropagation(); const l = LISTINGS.find(x => (x.homeId || x.id) === t.dataset.star); const on = !user(l || {}).star; changeUser(t.dataset.star, { star: on }, on ? 'Added to your shortlist' : 'Removed from your shortlist'); return; }
   if (t.dataset.dest) { set({ dest: t.dataset.dest }); if (S.lyrHeat) scheduleAreas(false); }
   else if (t.dataset.day) set({ day: t.dataset.day });
   else if (t.dataset.hour) set({ hour: +t.dataset.hour });
@@ -1376,8 +1417,12 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.id === 'dups') { S.dups = t.checked; save(); loadAreas(); }
   // rejected / not for me also hides the home (you can untick "Hide" again afterwards)
-  if (t.dataset?.ustatus) setUser(t.dataset.ustatus, ['rejected', 'notforme'].includes(t.value) ? { status: t.value, hidden: true } : { status: t.value });
-  if (t.dataset?.uhidden) setUser(t.dataset.uhidden, { hidden: t.checked });
+  if (t.dataset?.ustatus) {
+    const hide = ['rejected', 'notforme'].includes(t.value);
+    changeUser(t.dataset.ustatus, hide ? { status: t.value, hidden: true } : { status: t.value },
+      t.value ? `Marked “${STATUS_NAME[t.value] || t.value}”${hide ? ' and hidden' : ''}` : 'Status cleared');
+  }
+  if (t.dataset?.uhidden) changeUser(t.dataset.uhidden, { hidden: t.checked }, t.checked ? 'Hidden from the list' : 'Shown in the list again');
 });
 for (const [row, pop] of [['#shopRow', '#shopPop'], ['#parkRow', '#parkPop']]) {
   ['mouseenter', 'focusin'].forEach(ev => $(row).addEventListener(ev, () => { renderPops(); $(pop).hidden = false; }));
@@ -1437,4 +1482,99 @@ async function boot(reloadOnly = false) {
   if (!reloadOnly) routeView();
   setTimeout(() => map.invalidateSize(), 300);
 }
+// ---------- short empty states ----------
+function emptyText() {
+  const busy = !$('#refreshListingsTop').classList.contains('busy') ? '' : ' Results arrive when the refresh in progress is done.';
+  if (GROUP) return 'Nothing in this group.';
+  if (!LISTINGS.length) return (renderData.everRefreshed === false ? 'No listings yet. Press “Refresh listings”.' : 'No homes inside these areas. Try a longer walk or train time.') + busy;
+  if (S.f.list === 'star') return 'Nothing on your shortlist yet. Tap ☆ on a home to add it.';
+  if (S.f.list === 'hidden') return 'No hidden homes.';
+  return 'No homes match these filters. <a href="#" id="clearFilters">Clear filters</a>';
+}
+
+// ---------- keyboard ----------
+// Esc closes cards, menus and the walking view; ↑/↓ move through the list; / jumps to the map search.
+document.addEventListener('keydown', e => {
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.target.isContentEditable;
+  if (e.key === 'Escape') {
+    if (e.target.id === 'mapSearch') { e.target.value = ''; $('#searchRes').hidden = true; e.target.blur(); return; }
+    if (typing) return;
+    if (WALK) clearWalk();
+    if (S.sel) { select(null); drawStations(); }
+    if (GROUP) { GROUP = null; renderCards(); }
+    $$('.menu, .gmmenu').forEach(m => { m.hidden = true; });
+    return;
+  }
+  if (typing) return;
+  if (e.key === '/' && !$('#view-map').hidden) { e.preventDefault(); $('#mapSearch').focus(); return; }
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !$('#view-map').hidden) {
+    const cards = $$('#cards [data-listing]');
+    if (!cards.length) return;
+    e.preventDefault();
+    const i = cards.indexOf(document.activeElement);
+    const next = cards[Math.max(0, Math.min(cards.length - 1, i < 0 ? 0 : i + (e.key === 'ArrowDown' ? 1 : -1)))];
+    next.focus(); next.scrollIntoView({ block: 'nearest' });
+    LAST_HOVERED = byId(next.dataset.listing);
+    showHover({ kind: 'listing', id: next.dataset.listing });
+  }
+});
+
+// ---------- map search ----------
+let searchTimer, searchSeq = 0, searchMarker = null, SEARCH_ITEMS = [];
+function pickSearch(it) {
+  $('#searchRes').hidden = true;
+  $('#mapSearch').value = it.label;
+  const zoom = { adres: 17, postcode: 17, weg: 16, woonplaats: 13 }[it.type] || 15;
+  map.setView([it.lat, it.lon], zoom);
+  if (searchMarker) searchMarker.remove();
+  searchMarker = L.circleMarker([it.lat, it.lon], { radius: 7, color: '#fff', weight: 2, fillColor: '#0077BB', fillOpacity: 1, pane: 'dest' })
+    .bindTooltip(esc(it.label), { direction: 'top', offset: [0, -8] }).addTo(map);
+  if (it.type === 'adres' || it.type === 'postcode') showWalkFrom({ lat: it.lat, lon: it.lon, label: it.label, kind: 'listing', id: '__search__' });
+}
+$('#mapSearch').addEventListener('input', e => {
+  clearTimeout(searchTimer);
+  const q = e.target.value.trim();
+  if (q.length < 2) { $('#searchRes').hidden = true; return; }
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq;
+    const r = await fetch('/api/search?q=' + encodeURIComponent(q)).then(r => r.ok ? r.json() : { items: [] }).catch(() => ({ items: [] }));
+    if (seq !== searchSeq) return;
+    SEARCH_ITEMS = r.items || [];
+    const box = $('#searchRes');
+    box.innerHTML = SEARCH_ITEMS.length ? SEARCH_ITEMS.map((it, i) => `<button role="option" data-sr="${i}"><span>${esc(it.label)}</span><span class="small muted">${{ adres: 'address', postcode: 'postcode', weg: 'street', woonplaats: 'town' }[it.type] || ''}</span></button>`).join('')
+      : '<div class="small muted" style="padding:8px 10px">Nothing found</div>';
+    box.hidden = false;
+  }, 250);
+});
+$('#mapSearch').addEventListener('keydown', e => {
+  const btns = $$('#searchRes [data-sr]');
+  if (e.key === 'Enter' && SEARCH_ITEMS.length) { e.preventDefault(); pickSearch(SEARCH_ITEMS[0]); }
+  if (e.key === 'ArrowDown' && btns.length) { e.preventDefault(); btns[0].focus(); }
+});
+$('#searchRes').addEventListener('keydown', e => {
+  const btns = $$('#searchRes [data-sr]'), i = btns.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') { e.preventDefault(); (btns[i + 1] || btns[i]).focus(); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); i > 0 ? btns[i - 1].focus() : $('#mapSearch').focus(); }
+});
+$('#searchRes').addEventListener('click', e => { const b = e.target.closest('[data-sr]'); if (b) pickSearch(SEARCH_ITEMS[+b.dataset.sr]); });
+L.DomEvent.disableClickPropagation(document.querySelector('.mapsearch'));
+L.DomEvent.disableScrollPropagation(document.querySelector('.mapsearch'));
+
+// ---------- your data: import ----------
+$('#importFile').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let body;
+  try { body = JSON.parse(await f.text()); } catch { $('#backupStatus').textContent = 'That file isn\'t a backup from this app.'; return; }
+  if (!confirm('Replace your current stars, statuses, notes and settings with the ones in this file? (Your current ones are kept as a .bak file.)')) return;
+  const r = await fetch('/api/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#backupStatus').textContent = j.detail || 'Could not import'; return; }
+  renderHomeCard.filled = false;
+  await boot(true); renderHomeCard(); renderWeights(); renderTravel();
+  $('#backupStatus').textContent = '';
+  toast(`Imported notes for ${j.homes} homes and your settings`);
+});
+
 boot().then(() => renderData());  // also shows a job that is already running, on every page

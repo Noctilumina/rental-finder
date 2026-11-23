@@ -807,8 +807,83 @@ def index():
     return FileResponse(WEB / "index.html")
 
 
+
+# ---------- your data: export and import (Data screen) ----------
+@app.get("/api/export")
+def api_export():
+    """Your stars, statuses, notes and settings (weights, travel times, current home) as one file.
+    The EP-Online API key is left out: it's a password-like secret."""
+    return JSONResponse({"app": "rental-finder", "kind": "backup", "version": 1,
+                         "exported": time.strftime("%Y-%m-%d %H:%M"),
+                         "user": read_json(USER_JSON, {}) or {}, "settings": read_json(scoring.SETTINGS_JSON, {}) or {}},
+                        headers={"Content-Disposition": f'attachment; filename="rental-finder-backup-{time.strftime("%Y-%m-%d")}.json"'})
+
+
+@app.post("/api/import")
+def api_import(body: dict = Body(...)):
+    """Replaces your stars, statuses, notes and settings with those from a backup file (the old ones are kept as .bak)."""
+    if not isinstance(body, dict) or body.get("app") != "rental-finder" or body.get("kind") != "backup":
+        raise HTTPException(400, "This isn't a Rental finder backup file")
+    user, settings = body.get("user"), body.get("settings")
+    if not isinstance(user, dict) or not isinstance(settings, dict):
+        raise HTTPException(400, "The backup file is incomplete")
+    for path in (USER_JSON, scoring.SETTINGS_JSON):
+        if path.exists():
+            path.with_suffix(path.suffix + ".bak").write_bytes(path.read_bytes())
+    write_json(USER_JSON, user)
+    write_json(scoring.SETTINGS_JSON, {k: v for k, v in settings.items() if k in ("weights", "travel", "home")})
+    return {"imported": True, "homes": len(user), "settings": sorted(k for k in settings if k in ("weights", "travel", "home"))}
+
+
+# ---------- search a postcode, street or town (map) ----------
+@app.get("/api/search")
+def api_search(q: str):
+    q = q.strip()[:80]
+    if len(q) < 2:
+        return {"items": []}
+    try:
+        r = requests.get("https://api.pdok.nl/bzk/locatieserver/search/v3_1/free",
+                         params={"q": q, "rows": 6, "fl": "weergavenaam,type,centroide_ll",
+                                 "fq": "type:(postcode OR adres OR weg OR woonplaats)"},
+                         headers={"User-Agent": USER_AGENT}, timeout=10)
+        docs = r.json()["response"]["docs"]
+    except Exception:
+        raise HTTPException(502, "Search is not available right now")
+    out = []
+    for d in docs:
+        lon, lat = map(float, d["centroide_ll"].removeprefix("POINT(").removesuffix(")").split())
+        out.append({"label": d["weergavenaam"], "type": d["type"], "lat": lat, "lon": lon})
+    return {"items": out}
+
+
+# the page files last, so every /api route above is reached first
 app.mount("/", StaticFiles(directory=WEB), name="web")
 
+
+def already_running():
+    """True if Rental finder already answers on this port (then we just open it instead of starting twice)."""
+    try:
+        r = requests.get(f"http://127.0.0.1:{PORT}/api/status", timeout=1.5)
+        return r.ok and "job" in r.json()
+    except Exception:
+        return False
+
+
 if __name__ == "__main__":
+    if already_running():
+        print(f"Rental finder is already running at http://127.0.0.1:{PORT}; opening it in your browser.")
+        if not os.environ.get("RF_NO_BROWSER"):
+            import webbrowser
+            webbrowser.open(f"http://127.0.0.1:{PORT}")
+        sys.exit(0)
     print(f"Rental finder running at http://127.0.0.1:{PORT}")
+    if not os.environ.get("RF_NO_BROWSER"):  # open the browser once the server answers
+        def _open():
+            for _ in range(60):
+                time.sleep(0.5)
+                if already_running():
+                    import webbrowser
+                    webbrowser.open(f"http://127.0.0.1:{PORT}")
+                    return
+        threading.Thread(target=_open, daemon=True).start()
     uvicorn.run(app, host="127.0.0.1", port=PORT, log_level="warning")

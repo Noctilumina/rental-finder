@@ -12,21 +12,5 @@ if [ ! -x "$PY" ]; then
   exit 1
 fi
 
-URL=http://127.0.0.1:8765
-
-# open the browser as soon as the server answers
-(
-  i=0
-  while [ $i -lt 60 ]; do
-    if "$PY" -c "import urllib.request,sys; urllib.request.urlopen('$URL/api/status', timeout=1)" 2>/dev/null; then
-      if command -v open >/dev/null 2>&1 && [ "$(uname)" = "Darwin" ]; then open "$URL"
-      elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$URL" >/dev/null 2>&1
-      else echo "Open $URL in your browser."
-      fi
-      exit 0
-    fi
-    i=$((i + 1)); sleep 1
-  done
-) &
-
+# server.py opens the browser once it is ready (or just opens it if the app already runs)
 exec "$PY" server.py

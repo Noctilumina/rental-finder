@@ -27,6 +27,7 @@
 
 <div class="actionbar" id="actionBar" hidden></div>
 
+<div class="toasts" id="toasts" aria-live="polite"></div>
 <!-- MAP VIEW -->
 <section id="view-map" class="view">
   <aside class="criteria" id="criteria">
@@ -104,6 +105,10 @@
   <main class="mapwrap">
     <div id="map"></div>
     <div class="walknote" id="walkNote" role="status" hidden></div>
+    <div class="mapsearch" role="search">
+      <input type="search" id="mapSearch" placeholder="Postcode, street or town" aria-label="Search a postcode, street or town" autocomplete="off" spellcheck="false">
+      <div class="searchres" id="searchRes" role="listbox" hidden></div>
+    </div>
     <button class="edge left" id="toggleLeft" aria-label="Hide the criteria panel" title="Hide or show the criteria">‹</button>
     <button class="edge right" id="toggleRight" aria-label="Hide the listing panel" title="Hide or show the listings">›</button>
     <div class="detailcard" id="detailCard" hidden></div>
@@ -138,6 +143,7 @@
       <button class="btn" id="exportCsv">Export CSV</button>
     </div>
   </div>
+  <div class="row listtabs" id="tableTabs"></div>
   <section class="card filters" id="fullFilters"></section>
   <div class="tablewrap"><table id="table"><thead></thead><tbody></tbody></table></div>
   <p class="hint">Ads of the same home (same address and size, or the same spot with the same size and rent) appear once; each source links to its ad. Tick "Show duplicate ads" to see them separately. "Listed" is the site's date, or when this app first saw the home.</p>
@@ -164,6 +170,13 @@
     </div>
     <div class="row"><button class="btn primary" id="saveHome">Save</button><span class="small" id="homeStatus" role="status"></span></div>
     <div id="homeSummary"></div>
+  </section>
+  <section class="card" id="backupCard">
+    <div class="cardhead"><h2>Your data</h2></div>
+    <p class="muted small">Your stars, statuses, notes, score weights, travel times and current home in one file, to keep as a backup or to move to another computer. The EP-Online key isn't included.</p>
+    <div class="row"><a class="btn" id="exportData" href="/api/export" download>Export</a>
+      <label class="btn" for="importFile">Import…</label><input type="file" id="importFile" accept=".json,application/json" hidden>
+      <span class="small" id="backupStatus" role="status"></span></div>
   </section>
   <div class="grid2">
     <section class="card">

@@ -39,7 +39,7 @@ def main():
     shutil.copytree(REPO, app, ignore=shutil.ignore_patterns("data", ".git", "__pycache__", "ep-online-key.txt", "tests"))
     port = free_port()
     base = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen([sys.executable, "server.py"], cwd=app, env={**os.environ, "RF_PORT": str(port)},
+    proc = subprocess.Popen([sys.executable, "server.py"], cwd=app, env={**os.environ, "RF_PORT": str(port), "RF_NO_BROWSER": "1"},
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     failures = []
     try:
