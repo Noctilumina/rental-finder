@@ -319,7 +319,7 @@ def located(walk, shop, park, train, direct, dest, last, destwalk=0, _v=None):
         cand = np.nonzero(w <= walk)[0]
         wd = round(float(walk_dest[r])) if np.isfinite(walk_dest[r]) else None
         if not len(cand):
-            if destwalk and wd is not None and walk_dest[r] <= destwalk:  # walking distance from the office: no train needed
+            if destwalk and wd is not None and walk_dest[r] <= destwalk:  # walking distance from the destination: no train needed
                 out[items[i]["id"]] = {"station": None, "walk": None, "options": [], "walkDest": wd, "nearDest": True,
                                        "shop": round(float(sm[r])), "park": None if not np.isfinite(pk[r]) else round(float(pk[r])),
                                        "destM": round(float(dd[r]))}

@@ -292,6 +292,19 @@ function drawStations() {
     stationLayer.addLayer(m);
   }
 }
+// a small fixed mark at the destination (Lucas Gasselstraat 2), always on top and always visible
+map.createPane('dest'); map.getPane('dest').style.zIndex = 640;
+const DEST_SVG = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M3 1h1.6v14H3zM5.4 2H13l-2 3.2L13 8.4H5.4z"/></svg>';
+let destMarker = null;
+function drawDestination() {
+  const d = META.destination;
+  if (!d?.lat) return;
+  if (destMarker) destMarker.remove();
+  destMarker = L.marker([d.lat, d.lon], {
+    pane: 'dest', keyboard: false,
+    icon: L.divIcon({ className: 'dest-icon', html: DEST_SVG, iconSize: [22, 22], iconAnchor: [11, 11] }),
+  }).bindTooltip(`<b>Lucas Gasselstraat 2</b><br><span class="muted">Rosmalen · destination</span>`, { direction: 'top', offset: [0, -10] }).addTo(map);
+}
 function drawShops() {
   shopLayer.clearLayers();
   if (!S.lyrShops) { map.removeLayer(shopLayer); return; }
@@ -333,10 +346,11 @@ function renderLegend() {
     const labels = BANDS.length ? [`≤${BANDS[0]}`, ...BANDS.slice(1).map(b => `${b}`), `>${BANDS[BANDS.length - 1]}`] : [];
     parts.push(`<span class="scale" title="Typical off-peak door to door (min)">${labels.map((t, i) => `<span><i style="background:${BAND_COLORS[i]}"></i>${t}</span>`).join('')} min</span>`);
   } else if (S.lyrAreas) parts.push('<span><i class="sw area"></i>Area</span>');
-  if (S.lyrAreas && S.destWalk) parts.push(`<span><i class="sw destwalk"></i>${S.destWalk} min walk to the office</span>`);
+  if (S.lyrAreas && S.destWalk) parts.push(`<span><i class="sw destwalk"></i>${S.destWalk} min walk to Lucas Gasselstraat 2</span>`);
   parts.push(S.lyrAreas && S.lyrHeat
     ? `<span><i class="sw dot on" style="background:${BAND_COLORS[2]};box-shadow:0 0 0 1.5px #1a1a1a"></i>Station, by its time</span>`
     : '<span><i class="sw dot on"></i>Station</span>');
+  parts.push(`<span><i class="sw dest">${DEST_SVG}</i>Destination</span>`);
   if (S.lyrParks) parts.push('<span><i class="sw park"></i>Park</span>');
   parts.push('<span><i class="sw pin star">1</i>Shortlisted</span>');
   $('#legend').innerHTML = parts.join('') + btn;
@@ -758,7 +772,7 @@ function renderDetail(id) {
         <div class="seg" role="group" aria-label="Destination"><button data-dest="cs" class="${S.dest === 'cs' ? 'on' : ''}">Den Bosch CS</button><button data-dest="lg" class="${S.dest === 'lg' ? 'on' : ''}">Lucas Gasselstraat 2</button></div>
         <div class="seg small" role="group" aria-label="Day"><button data-day="wk" class="${S.day === 'wk' ? 'on' : ''}">Weekday</button><button data-day="sa" class="${S.day === 'sa' ? 'on' : ''}">Saturday</button><button data-day="su" class="${S.day === 'su' ? 'on' : ''}">Sunday</button></div>
         <div class="breakdown">
-          ${l.nearDest ? `<div><span><b>Within walking distance of the office: no train needed</b></span><span>${l.walkDest} min walk</span></div>` : ''}
+          ${l.nearDest ? `<div><span><b>Within walking distance of Lucas Gasselstraat 2: no train needed</b></span><span>${l.walkDest} min walk</span></div>` : ''}
           ${r?.direct ? `<div><span>${r.how === 'walk' ? 'Walk' : 'Bike'} straight to Lucas Gasselstraat 2 (${(l.destM / 1000).toFixed(1)} km)</span><span>${r.min} min</span></div>` : r ? `
           <div><span>Walk to ${esc(st?.name || 'station')}</span><span>${r.walk} min</span></div>
           ${st?.code === r.hub ? '' : `<div><span>Wait + ${S.direct ? 'direct ' : ''}train to ${esc(HUB_NAMES()[r.hub] || '')} at ${hh(S.hour)}</span><span>${r.train} min</span></div>`}
@@ -1147,6 +1161,7 @@ async function boot(reloadOnly = false) {
   STATIONS_DATA = st;
   STATIONS = st.stations; HOURS = st.hours || []; META = st.meta || {};
   BYCODE = Object.fromEntries(STATIONS.map(s => [s.code, s]));
+  drawDestination();
   if (!reloadOnly) { SHOPS = await fetch('/api/supermarkets').then(r => r.json()); drawShops(); drawParks(); }
   await loadAreas();
   if (!reloadOnly) routeView();
