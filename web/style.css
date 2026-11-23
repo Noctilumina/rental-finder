@@ -283,3 +283,4 @@ input.custom{border-color:var(--accent);background:var(--accent-bg)}
 .cmptable td:nth-child(n+2),.cmptable th:nth-child(n+2){text-align:right}
 .warntext{color:#b42318}
 .flab{display:flex;gap:6px;align-items:baseline;white-space:nowrap}
+.greymap .leaflet-tile-pane{filter:grayscale(1) brightness(1.03) contrast(.92)}

@@ -11,7 +11,7 @@ const PARK_ANY = 30;
 // ---------- state (persisted per browser) ----------
 const DEFAULTS = {
   walk: 15, destWalk: 30, shop: 15, park: PARK_ANY, train: 30, direct: true, dest: 'lg', lastMode: 'bike', day: 'wk', hour: 14,
-  lyrAreas: true, lyrHeat: false, lyrStations: true, lyrShops: false, lyrParks: false, lyrListings: true, other: true,
+  lyrAreas: true, lyrHeat: false, lyrStations: true, lyrShops: false, lyrParks: false, lyrListings: true, lyrGrey: false, other: true,
   sort: 'score', listW: 340, sel: null, leftOpen: true, rightOpen: true, dups: false, legend: false,
   f: { rentMin: '', rentMax: '', rentIncl: 'any', m2: '', rooms: '', beds: '', label: 'any', interior: 'any',
        avail: '', listed: 'any', pets: false, gm: [], newOnly: false, minScore: '', ppm2Max: '', list: 'active', state: 'current' },
@@ -573,7 +573,8 @@ function renderControls() {
   $('#lastHint').textContent = Object.entries(arr).filter(([, v]) => v).map(([c, v]) => `${names[c] || c}: ${v[S.lastMode]} min`).join(' · ');
   $$('[data-dest]').forEach(b => b.classList.toggle('on', b.dataset.dest === S.dest));
   $$('[data-day]').forEach(b => b.classList.toggle('on', b.dataset.day === S.day));
-  for (const k of ['lyrAreas', 'lyrHeat', 'lyrStations', 'lyrShops', 'lyrParks', 'lyrListings']) $('#' + k).checked = S[k];
+  for (const k of ['lyrAreas', 'lyrHeat', 'lyrStations', 'lyrShops', 'lyrParks', 'lyrListings', 'lyrGrey']) $('#' + k).checked = S[k];
+  $('#map').classList.toggle('greymap', !!S.lyrGrey);  // optional: only the app's own colours stand out
   $('#lyrHeat').disabled = !S.lyrAreas;
   $('#otherBody').hidden = !S.other; $('#otherChevron').textContent = S.other ? '▴' : '▾';
   $('#otherToggle').setAttribute('aria-expanded', S.other);
@@ -1177,6 +1178,7 @@ $('#direct').addEventListener('change', e => set({ direct: e.target.checked }, t
 $('#otherToggle').addEventListener('click', () => set({ other: !S.other }));
 for (const k of ['lyrAreas', 'lyrHeat', 'lyrStations', 'lyrListings']) $('#' + k).addEventListener('change', e => { S[k] = e.target.checked; save(); renderControls(); loadAreas(k === 'lyrListings'); });
 $('#lyrShops').addEventListener('change', e => { S.lyrShops = e.target.checked; save(); drawShops(); renderLegend(); });
+$('#lyrGrey').addEventListener('change', e => { S.lyrGrey = e.target.checked; save(); renderControls(); });
 $('#lyrParks').addEventListener('change', e => { S.lyrParks = e.target.checked; save(); drawParks().then(renderPops); renderLegend(); });
 $('#toggleLeft').addEventListener('click', () => { S.leftOpen = !S.leftOpen; save(); renderControls(); map.invalidateSize(); });
 $('#toggleRight').addEventListener('click', () => { S.rightOpen = !S.rightOpen; save(); renderControls(); map.invalidateSize(); });
