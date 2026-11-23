@@ -11,7 +11,7 @@ const PARK_ANY = 30;
 // ---------- state (persisted per browser) ----------
 const DEFAULTS = {
   walk: 15, destWalk: 30, shop: 15, park: PARK_ANY, train: 30, direct: true, dest: 'lg', lastMode: 'bike', day: 'wk', hour: 14,
-  lyrAreas: true, lyrHeat: false, lyrStations: true, lyrShops: false, lyrParks: false, lyrListings: true, lyrGrey: false, lyrWalkFrom: true, lyrRoutes: true, other: true,
+  lyrAreas: true, lyrHeat: false, lyrStations: true, lyrShops: false, lyrParks: false, lyrListings: true, lyrGrey: false, lyrWalkFrom: true, lyrRoutes: true, notify: false, other: true,
   sort: 'score', listW: 340, sel: null, leftOpen: true, rightOpen: true, dups: false, legend: false,
   f: { rentMin: '', rentMax: '', rentIncl: 'any', m2: '', rooms: '', beds: '', label: 'any', interior: 'any',
        avail: '', listed: 'any', pets: false, gm: [], newOnly: false, minScore: '', ppm2Max: '', list: 'active', state: 'current' },
@@ -225,6 +225,7 @@ function toast(msg, undo, ms = 6000) {
   const el = document.createElement('div');
   el.className = 'toast';
   el.innerHTML = `<span>${msg}</span>${undo ? '<button class="toastbtn">Undo</button>' : ''}<button class="toastx" aria-label="Dismiss">×</button>`;
+  $$('#toasts .toast').forEach(t => t.remove());  // one message at a time: the newest replaces the old
   const close = () => { el.classList.add('out'); setTimeout(() => el.remove(), 200); };
   el.querySelector('.toastx').onclick = close;
   if (undo) el.querySelector('.toastbtn').onclick = () => { close(); undo(); };
@@ -466,6 +467,14 @@ map.createPane('walkroutes'); map.getPane('walkroutes').style.zIndex = 450;
 const walkRenderer = L.svg({ pane: 'walkroutes' });  // SVG (not canvas) so the dotted lines can drift gently
 const ROUTE_COLOR = '#0077BB';  // a clear blue: well visible for people who see red poorly
 const PLACE_KIND = { station: 'Station', shop: 'Shop', park: 'Park', dest: 'Destination' };
+const PLACE_SVG = {  // small icons at the end of each walking route (no text on the map)
+  station: '<path d="M5 2h6a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2l1.5 2h-1.8L9.2 12H6.8l-1.5 2H3.5L5 12a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm0 2v3h6V4zm.8 5a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8zm4.4 0a.9.9 0 1 0 0 1.8.9.9 0 0 0 0-1.8z"/>',
+  shop: '<path d="M1 2h2.2l.6 2H15l-1.6 5.5H5.3L5.8 11H13v1.5H4.7L2.4 3.5H1zm4.5 11.2a1.2 1.2 0 1 1 0 .1zm6 0a1.2 1.2 0 1 1 0 .1z"/>',
+  park: '<path d="M8 1 3.5 7H6L3 11h4.2v4h1.6v-4H13l-3-4h2.5z"/>',
+  dest: '<path d="M3 1h1.6v14H3zM5.4 2H13l-2 3.2L13 8.4H5.4z"/>',
+};
+const placeIcon = kind => L.divIcon({ className: 'placeicon', iconSize: [20, 20], iconAnchor: [10, 10],
+  html: `<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><g fill="currentColor">${PLACE_SVG[kind] || ''}</g></svg>` });
 const walkLayer = L.geoJSON(null, { pane: 'walk', interactive: false,
   style: f => ({ stroke: false, fillColor: BAND_COLORS[f.properties.band] || BAND_COLORS.at(-1), fillOpacity: 0.42 }) });
 const routeLayer = L.layerGroup();
@@ -497,8 +506,8 @@ function drawWalk() {
     if (!ll || ll.length < 2) continue;
     L.polyline(ll, { renderer: walkRenderer, color: '#fff', weight: 6, opacity: 0.85, interactive: false }).addTo(routeLayer);
     L.polyline(ll, { renderer: walkRenderer, color: ROUTE_COLOR, weight: 3, opacity: 1, dashArray: '1 7', lineCap: 'round', className: 'walkroute', interactive: false }).addTo(routeLayer);
-    L.circleMarker([pl.lat, pl.lon], { renderer: walkRenderer, radius: 4, color: '#fff', weight: 2, fillColor: ROUTE_COLOR, fillOpacity: 1, interactive: true })
-      .bindTooltip(`${esc(pl.name)} · ${Math.round(pl.min)} min`, { permanent: true, direction: 'right', offset: [6, 0], className: 'walklabel' })
+    L.marker([pl.lat, pl.lon], { icon: placeIcon(pl.kind), pane: 'walkroutes', keyboard: false })
+      .bindTooltip(`${esc(pl.name)} · ${Math.round(pl.min)} min walk`, { direction: 'top', offset: [0, -10] })
       .addTo(routeLayer);
   }
   routeLayer.addTo(map);
@@ -1278,7 +1287,7 @@ async function renderData() {
     const what = j.name === 'map' ? 'Map data rebuilt' : j.name === 'energy' ? 'Energy labels updated' : 'Listing refresh finished';
     const msg = j.code === 0 ? what + (j.name === 'listings' && LAST_NEW != null ? ` · ${LAST_NEW} new homes` : '') : `${what.replace(/ (finished|rebuilt|updated)$/, '')} stopped early: see the log on the Data screen`;
     toast(esc(msg), null, 10000);
-    try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('Rental finder', { body: msg }); } catch { /* not available */ }
+    try { if (S.notify && document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('Rental finder', { body: msg }); } catch { /* not available */ }
   }
   document.title = running ? `${Math.round(((j.progress || progressFromLog(j))?.overall ?? 0) * 100)}% · Rental finder` : 'Rental finder';
 }
@@ -1320,7 +1329,7 @@ function renderJobButton(j, running) {
 async function startJob(name) {
   const r = await fetch('/api/refresh/' + name, { method: 'POST' });
   if (!r.ok) { toast(esc((await r.json().catch(() => ({}))).detail || 'Could not start')); return renderData(); }
-  try { if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission(); } catch { /* not available */ }
+
   renderData();
 }
 
@@ -1507,7 +1516,7 @@ document.addEventListener('keydown', e => {
   }
   if (typing) return;
   if (e.key === '/' && !$('#view-map').hidden) { e.preventDefault(); $('#mapSearch').focus(); return; }
-  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !$('#view-map').hidden) {
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !$('#view-map').hidden && e.target.closest?.('#cards')) {
     const cards = $$('#cards [data-listing]');
     if (!cards.length) return;
     e.preventDefault();
@@ -1576,5 +1585,22 @@ $('#importFile').addEventListener('change', async e => {
   $('#backupStatus').textContent = '';
   toast(`Imported notes for ${j.homes} homes and your settings`);
 });
+
+// ---------- opt-in: a system notification when a refresh is done ----------
+function renderNotify() {
+  const ok = 'Notification' in window;
+  $('#notifyDone').checked = !!S.notify && ok;
+  $('#notifyDone').disabled = !ok;
+  $('#notifyHint').textContent = !ok ? 'Not available in this browser.'
+    : S.notify && Notification.permission === 'denied' ? 'Blocked in your browser settings for this site.' : '';
+}
+$('#notifyDone').addEventListener('change', async e => {
+  if (e.target.checked && 'Notification' in window && Notification.permission !== 'granted') {
+    try { await Notification.requestPermission(); } catch { /* not available */ }
+  }
+  S.notify = e.target.checked;  // if the browser blocks it, the hint below says so
+  save(); renderNotify();
+});
+renderNotify();
 
 boot().then(() => renderData());  // also shows a job that is already running, on every page
