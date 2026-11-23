@@ -15,8 +15,9 @@ with Ctrl+C. Use **Refresh listings** (top right, or the Data screen) to fetch n
 
 ## Setup (once, on a new machine)
 
-Needs Python 3.11 or newer. The app's own data is not in the repository: after setting up, open the Data screen
-and press **Rebuild map data** (about 10 minutes), then **Refresh listings** (the first one takes an hour or more).
+Needs Python 3.11 or newer. The app's own data is not in the repository: after setting up, press **Refresh
+listings**. On a new install it first builds the map data by itself (about 10 minutes), then searches; the first
+search takes an hour or more.
 
 **Windows** (PowerShell):
 

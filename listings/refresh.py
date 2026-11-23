@@ -295,6 +295,8 @@ def recheck(old, adapters_by_site, br, now):
 
 
 def main(only_towns=None, only_sites=None):
+    from pipeline import rebuild
+    rebuild.ensure(log=log)  # new install: build the map data first instead of stopping
     stations = read_json(STATIONS_JSON, {"stations": []})["stations"]
     if not stations:
         raise SystemExit("No station data yet: build the map data first.")
