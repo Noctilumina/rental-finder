@@ -264,3 +264,22 @@ input.custom{border-color:var(--accent);background:var(--accent-bg)}
 .sw.destwalk{width:16px;height:0;border-top:2.5px dashed #C2410C;align-self:center}
 .dest-icon{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;background:#1f2937;color:#fff;font-size:13px;line-height:1;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
 .sw.dest{width:14px;height:14px;border-radius:3px;background:#1f2937;color:#fff;font-size:9px;font-style:normal;display:inline-flex;align-items:center;justify-content:center}
+
+/* ---- your current home ---- */
+.home-icon{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#BE185D;color:#fff;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)}
+.sw.home{width:14px;height:14px;border-radius:50%;background:#BE185D;color:#fff;font-style:normal;display:inline-flex;align-items:center;justify-content:center}
+.sw.home svg{width:9px;height:9px}
+.homegrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:10px 0}
+.homegrid input,.homegrid select{height:36px}
+.opt{font-size:11px;color:var(--muted);font-weight:400}
+.homesum{display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}
+.homepin{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:#BE185D;color:#fff}
+.homepin svg{width:15px;height:15px}
+.cmp{font-size:12px;font-weight:500;white-space:nowrap}
+.cmp.better{color:#1d4ed8}
+.cmp.worse{color:#b42318}
+.cmp.same{color:var(--muted)}
+.travel .cmp{display:block}
+.cmptable td:nth-child(n+2),.cmptable th:nth-child(n+2){text-align:right}
+.warntext{color:#b42318}
+.flab{display:flex;gap:6px;align-items:baseline;white-space:nowrap}

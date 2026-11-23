@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 from pyproj import Transformer
 from scipy.spatial import cKDTree
 
+import home
 import scoring
 from pipeline.common import (BIKE_PARK_MIN, BIKE_SPEED_M_PER_MIN, CACHE, GRID_NPZ, LISTINGS_JSON, MAX_WALK_PARK_MIN,
                              META_JSON, NOISE_NPZ, PARKS_JSON, ROOT, STATIONS_JSON, SUPERMARKETS_JSON, USER_AGENT,
@@ -359,6 +360,9 @@ def noise_db(lats, lons):
 @lru_cache(maxsize=4)
 def scored(_v=None):
     items = listings_data()["items"]
+    mine = home.get()
+    if mine:  # your current home is scored the same way, for comparison (kept out of medians and percentiles)
+        items = items + [home.as_item(mine)]
     pts = [i for i, it in enumerate(items) if it.get("lat") is not None]
     if not pts or grid() is None:
         return {}
@@ -445,6 +449,46 @@ def api_put_travel(body: dict = Body(...)):
         return scoring.save_travel(body or {})
     except (TypeError, ValueError, AttributeError):
         raise HTTPException(400, "minutes and speeds must be numbers")
+
+
+def home_view():
+    """Your current home with the same travel facts and score a listing gets (any station within an hour's walk)."""
+    h = home.get()
+    if not h:
+        return {"home": None}
+    out = {"home": h, "score": scored(version()).get(home.HOME_ID)}
+    if grid() is not None:
+        codes, W, sm, pk, dd = lookup([h["lat"]], [h["lon"]], 60, False)
+        w = W[0]
+        near = [j for j in np.argsort(w)[:4] if np.isfinite(w[j])]
+        wd = direct_minutes(dd, "walk")[0]
+        out["travel"] = {"options": [[codes[j], round(float(w[j]), 1)] for j in near],
+                         "station": codes[near[0]] if near else None, "walk": round(float(w[near[0]])) if near else None,
+                         "shop": None if not np.isfinite(sm[0]) else round(float(sm[0])),
+                         "park": None if not np.isfinite(pk[0]) else round(float(pk[0])),
+                         "destM": None if not np.isfinite(dd[0]) else round(float(dd[0])),
+                         "walkDest": None if not np.isfinite(wd) else round(float(wd))}
+    return out
+
+
+@app.get("/api/home")
+def api_home():
+    return home_view()
+
+
+@app.put("/api/home")
+def api_put_home(body: dict = Body(...)):
+    try:
+        home.save(body or {})
+    except home.HomeError as e:
+        raise HTTPException(400, str(e))
+    return home_view()
+
+
+@app.delete("/api/home")
+def api_delete_home():
+    home.clear()
+    return {"home": None}
 
 
 @app.get("/api/weights")

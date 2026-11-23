@@ -39,7 +39,7 @@ search takes an hour or more.
 To use a Python somewhere else, set `RF_PYTHON` to it before running `./start.sh`.
 
 **Moving to another computer:** copy `data/user.json` (your stars, statuses and notes), `data/settings.json`
-(score weights, travel times) and `ep-online-key.txt` along. On Linux and macOS the key file is readable only by you.
+(score weights, travel times, your current home) and `ep-online-key.txt` along. On Linux and macOS the key file is readable only by you.
 
 The optional browser-based sources (see Listings) use Microsoft Edge on Windows and Google Chrome elsewhere; set
 `RF_BROWSER_CHANNEL` to pick another browser.

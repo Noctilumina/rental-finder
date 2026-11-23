@@ -147,6 +147,20 @@
 
 <!-- DATA VIEW -->
 <section id="view-data" class="view page" hidden>
+  <section class="card" id="homeCard">
+    <div class="cardhead"><h2>Your current home</h2><button class="btn" id="clearHome" hidden>Remove</button></div>
+    <p class="muted small">Fill in where you live now and every listing is compared with it: travel time, shops, park, noise, neighbourhood, rent and score. A postcode is enough; a house number adds the exact address (and its official energy label once you have an EP-Online key). Saved only on this computer.</p>
+    <div class="homegrid">
+      <label class="field" for="hPostcode"><span class="flab">Postcode</span><input type="text" id="hPostcode" placeholder="1234 AB" autocomplete="off" maxlength="7"></label>
+      <label class="field" for="hNumber"><span class="flab">House number <span class="opt">optional</span></span><input type="text" id="hNumber" placeholder="12A" autocomplete="off" maxlength="10"></label>
+      <label class="field" for="hRent"><span class="flab">Rent per month (€) <span class="opt">optional</span></span><input id="hRent" type="number" min="0" step="10"></label>
+      <label class="field" for="hM2"><span class="flab">Floor area (m²) <span class="opt">optional</span></span><input id="hM2" type="number" min="0"></label>
+      <label class="field" for="hRooms"><span class="flab">Rooms <span class="opt">optional</span></span><input id="hRooms" type="number" min="1" max="20"></label>
+      <label class="field" for="hLabel"><span class="flab">Energy label <span class="opt">optional</span></span><select id="hLabel"><option value="">Don't know</option><option>A++++</option><option>A+++</option><option>A++</option><option>A+</option><option>A</option><option>B</option><option>C</option><option>D</option><option>E</option><option>F</option><option>G</option></select></label>
+    </div>
+    <div class="row"><button class="btn primary" id="saveHome">Save</button><span class="small" id="homeStatus" role="status"></span></div>
+    <div id="homeSummary"></div>
+  </section>
   <div class="grid2">
     <section class="card">
       <div class="cardhead"><h2>Listings</h2><span class="muted small" id="dsListUpdated"></span></div>

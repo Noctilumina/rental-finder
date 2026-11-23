@@ -28,6 +28,7 @@ const save = () => { try { localStorage.setItem('rf-state', JSON.stringify(S)); 
 
 let STATIONS = [], HOURS = [], META = {}, BYCODE = {}, QUAL = new Set(), LISTINGS = [], SHOPS = [], SHOP_COUNTS = {};
 let PARKS = null, LAST_REFRESH = null, SCORE_INFO = {}, BANDS = [];
+let CURRENT = null;  // your current home: {home, score, travel} from /api/home, or null
 let HOVER = null; // {kind, id} currently previewed on the map
 let GROUP = null;  // ids of a clicked group of pins: the list shows only these until you click elsewhere
 
@@ -305,6 +306,123 @@ function drawDestination() {
     icon: L.divIcon({ className: 'dest-icon', html: DEST_SVG, iconSize: [22, 22], iconAnchor: [11, 11] }),
   }).bindTooltip(`<b>Lucas Gasselstraat 2</b><br><span class="muted">Rosmalen · destination</span>`, { direction: 'top', offset: [0, -10] }).addTo(map);
 }
+// ---------- your current home ----------
+const HOME_SVG = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M8 1.5 1 7.4l1 1.2 1-.8V14h4v-4h2v4h4V7.8l1 .8 1-1.2z"/></svg>';
+let homeMarker = null;
+async function loadHome() {
+  CURRENT = await fetch('/api/home').then(r => r.json()).catch(() => null);
+  if (!CURRENT?.home) CURRENT = null;
+  drawHome();
+}
+/** The current home shaped like a listing, so the same route and score code works on it. */
+function homeAsListing() {
+  if (!CURRENT) return null;
+  const h = CURRENT.home, t = CURRENT.travel || {};
+  return { ...t, id: '__home__', address: h.label, rent: h.rent, m2: h.m2, rooms: h.rooms, energyLabel: h.energyLabel, score: CURRENT.score };
+}
+function drawHome() {
+  if (homeMarker) { homeMarker.remove(); homeMarker = null; }
+  if (!CURRENT) return;
+  const h = CURRENT.home, r = route(homeAsListing());
+  homeMarker = L.marker([h.lat, h.lon], {
+    pane: 'dest', keyboard: false,
+    icon: L.divIcon({ className: 'home-icon', html: HOME_SVG, iconSize: [22, 22], iconAnchor: [11, 11] }),
+  }).bindTooltip(`<b>Your current home</b><br>${esc(h.label)}${r ? `<br><span class="muted">${r.min} min to ${destName()} at ${hh(S.hour)}</span>` : ''}`, { direction: 'top', offset: [0, -10] }).addTo(map);
+}
+/** One line comparing a listing's travel time with the current home's ("6 min quicker than now"). */
+function vsNow(l) {
+  const H = homeAsListing();
+  if (!H) return '';
+  const a = route(l)?.min, b = route(H)?.min;
+  if (a == null || b == null) return '';
+  const d = a - b;
+  return d === 0 ? '<span class="cmp same">same as now</span>' : `<span class="cmp ${d < 0 ? 'better' : 'worse'}">${Math.abs(d)} min ${d < 0 ? 'quicker' : 'slower'} than now</span>`;
+}
+/** Detail page: this listing next to your current home. */
+function compareCard(l) {
+  const H = homeAsListing();
+  if (!H) return `<section class="card cmpcard"><h2>Compared to your current home</h2><span class="small muted"><a href="#data">Fill in your current home</a> (a postcode is enough) to compare travel time, shops, noise, neighbourhood and rent with where you live now.</span></section>`;
+  const rl = route(l), rh = route(H);
+  const sl = l.score || {}, sh = H.score || {};
+  const part = (s, k) => s.parts?.[k]?.score ?? null;
+  // [label, now, this, unit/format, better = 'lower' | 'higher']
+  const rows = [
+    ['Door to door at ' + hh(S.hour), rh?.min, rl?.min, v => v + ' min', 'lower'],
+    ['Walk to the station', H.walk, l.walk, v => v + ' min', 'lower'],
+    ['Walk to supermarket', H.shop, l.shop, v => v + ' min', 'lower'],
+    ['Walk to a park', H.park, l.park, v => v + ' min', 'lower'],
+    ['Noise (estimate)', sh.noiseDb, sl.noiseDb, v => '≈' + v + ' dB', 'lower'],
+    ['Neighbourhood', part(sh, 'neighbourhood'), part(sl, 'neighbourhood'), v => v.toFixed(1) + ' / 10', 'higher'],
+    ['Safety', part(sh, 'safety'), part(sl, 'safety'), v => v.toFixed(1) + ' / 10', 'higher'],
+    ['Rent per month', H.rent, l.rent, v => fmtEur(v), 'lower'],
+    ['Floor area', H.m2, l.m2, v => v + ' m²', 'higher'],
+    ['Rent per m²', sh.ppm2, sl.ppm2, v => '€' + v.toFixed(1), 'lower'],
+    ['Score', sh.total, sl.total, v => v.toFixed(1), 'higher'],
+  ];
+  const words = { 'Door to door': ['quicker', 'slower'], 'Walk': ['shorter', 'longer'], 'Noise': ['quieter', 'louder'],
+                  'Rent per month': ['cheaper', 'dearer'], 'Rent per m²': ['cheaper', 'dearer'], 'Floor area': ['bigger', 'smaller'] };
+  const diff = (label, a, b, fmt, better) => {
+    if (a == null || b == null) return '<span class="muted">—</span>';
+    const d = b - a;
+    if (Math.abs(d) < 0.05) return '<span class="cmp same">same</span>';
+    const good = better === 'lower' ? d < 0 : d > 0;
+    const w = Object.entries(words).find(([k]) => label.startsWith(k))?.[1] || ['better', 'worse'];
+    const mag = label.startsWith('Rent per month') ? fmtEur(Math.abs(d)) : label.startsWith('Rent per m²') ? '€' + Math.abs(d).toFixed(1)
+      : label.startsWith('Floor') ? Math.round(Math.abs(d)) + ' m²' : label.startsWith('Noise') ? Math.round(Math.abs(d)) + ' dB'
+      : /Neighbourhood|Safety|Score/.test(label) ? Math.abs(d).toFixed(1) : Math.round(Math.abs(d)) + ' min';
+    // arrow = which way the number goes; colour and word = whether that's better for you
+    return `<span class="cmp ${good ? 'better' : 'worse'}">${d < 0 ? '▼' : '▲'} ${mag} ${good ? w[0] : w[1]}</span>`;
+  };
+  const body = rows.filter(([, a, b]) => a != null || b != null).map(([label, a, b, fmt, better]) =>
+    `<tr><td>${esc(label)}</td><td>${a == null ? '—' : fmt(a)}</td><td><b>${b == null ? '—' : fmt(b)}</b></td><td>${diff(label, a, b, fmt, better)}</td></tr>`).join('');
+  return `<section class="card cmpcard"><div class="cardhead"><h2>Compared to your current home</h2><span class="small muted">${esc(CURRENT.home.label)}</span></div>
+    <table class="pts cmptable"><thead><tr><th></th><th>Now</th><th>This home</th><th>Difference</th></tr></thead><tbody>${body}</tbody></table>
+    ${CURRENT.home.rent == null ? '<span class="small muted">Add your current rent and floor area on the <a href="#data">Data screen</a> to compare rent as well.</span>' : ''}</section>`;
+}
+function renderHomeCard() {
+  const h = CURRENT?.home;
+  $('#clearHome').hidden = !h;
+  if (h && !renderHomeCard.filled) {
+    renderHomeCard.filled = true;
+    $('#hPostcode').value = h.postcode || ''; $('#hNumber').value = h.number || '';
+    $('#hRent').value = h.rent ?? ''; $('#hM2').value = h.m2 ?? ''; $('#hRooms').value = h.rooms ?? '';
+    $('#hLabel').value = h.energySource === 'you' ? h.energyLabel || '' : '';
+  }
+  if (!h) { $('#homeSummary').innerHTML = ''; return; }
+  const H = homeAsListing(), r = route(H), sc = CURRENT.score;
+  $('#homeSummary').innerHTML = `<div class="homesum">
+    <span class="homepin">${HOME_SVG}</span>
+    <div><b>${esc(h.label)}</b><div class="small muted">${esc([h.buurt, h.gemeente && 'municipality ' + h.gemeente].filter(Boolean).join(', '))}${h.number ? '' : ' · middle of the postcode'}</div></div>
+    <div><b>${r ? r.min + ' min' : '—'}</b><div class="small muted">to ${destName()} at ${hh(S.hour)}${r ? ', ' + esc(routeText(r)) : ''}</div></div>
+    <div><b>${H.shop ?? '30+'} / ${H.park ?? '30+'} min</b><div class="small muted">supermarket / park</div></div>
+    <div>${sc?.total != null ? scoreHtml({ score: sc }) : '—'}<div class="small muted">score${sc?.totalPct != null ? `, better than ${sc.totalPct}% of listings` : ''}</div></div>
+    ${h.energyLabel ? `<div><b>${esc(h.energyLabel)}</b><div class="small muted">energy label${h.energySource === 'EP-Online' ? ' (EP-Online)' : ''}</div></div>` : ''}
+  </div>`;
+}
+async function saveHome() {
+  const body = { postcode: $('#hPostcode').value, number: $('#hNumber').value, rent: $('#hRent').value, m2: $('#hM2').value,
+                 rooms: $('#hRooms').value, energyLabel: $('#hLabel').value };
+  $('#homeStatus').textContent = 'Looking up…'; $('#homeStatus').className = 'small';
+  const r = await fetch('/api/home', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { $('#homeStatus').textContent = j.detail || 'Could not save'; $('#homeStatus').className = 'small warntext'; return; }
+  renderHomeCard.filled = false;
+  await boot(true);
+  renderHomeCard();
+  $('#homeStatus').textContent = 'Saved. Listings now show how they compare.';
+}
+$('#saveHome').addEventListener('click', saveHome);
+for (const id of ['#hPostcode', '#hNumber', '#hRent', '#hM2', '#hRooms']) $(id).addEventListener('keydown', e => { if (e.key === 'Enter') saveHome(); });
+$('#clearHome').addEventListener('click', async () => {
+  await fetch('/api/home', { method: 'DELETE' });
+  for (const id of ['#hPostcode', '#hNumber', '#hRent', '#hM2', '#hRooms']) $(id).value = '';
+  $('#hLabel').value = '';
+  renderHomeCard.filled = false;
+  await boot(true);
+  renderHomeCard();
+  $('#homeStatus').textContent = 'Removed.';
+});
+
 function drawShops() {
   shopLayer.clearLayers();
   if (!S.lyrShops) { map.removeLayer(shopLayer); return; }
@@ -351,6 +469,7 @@ function renderLegend() {
     ? `<span><i class="sw dot on" style="background:${BAND_COLORS[2]};box-shadow:0 0 0 1.5px #1a1a1a"></i>Station, by its time</span>`
     : '<span><i class="sw dot on"></i>Station</span>');
   parts.push(`<span><i class="sw dest">${DEST_SVG}</i>Destination</span>`);
+  if (CURRENT) parts.push(`<span><i class="sw home">${HOME_SVG}</i>Your home</span>`);
   if (S.lyrParks) parts.push('<span><i class="sw park"></i>Park</span>');
   parts.push('<span><i class="sw pin star">1</i>Shortlisted</span>');
   $('#legend').innerHTML = parts.join('') + btn;
@@ -487,7 +606,7 @@ function cardHtml(l, i) {
       <span class="row" style="gap:6px">${scoreHtml(l)}${starBtn(l)}</span></span>
     <span>${esc(l.address)}${l.city ? ', ' + esc(l.city) : ''}</span>
     <span class="small muted">${esc(metaLine(l))}</span></span></span>
-    <span class="travel"><span><b>${r?.min ?? '—'} min</b> to ${S.dest === 'lg' ? 'Lucas Gasselstraat' : 'Den Bosch CS'} at ${hh(S.hour)}</span><span class="muted">${esc(r?.direct ? routeText(r) : (BYCODE[r?.station]?.name || '') + (r ? ', ' + r.walk + ' min walk' : ''))}</span></span>
+    <span class="travel"><span><b>${r?.min ?? '—'} min</b> to ${S.dest === 'lg' ? 'Lucas Gasselstraat' : 'Den Bosch CS'} at ${hh(S.hour)}${vsNow(l)}</span><span class="muted">${esc(r?.direct ? routeText(r) : (BYCODE[r?.station]?.name || '') + (r ? ', ' + r.walk + ' min walk' : ''))}</span></span>
     <span class="tags">${stateTags(l)}${(l.sources || []).slice(0, 3).map(s => `<span class="tag">${esc(s.site)}</span>`).join('')}${(l.sources || []).length > 3 ? `<span class="tag">+${l.sources.length - 3}</span>` : ''}<span class="small muted" style="margin-left:auto">${ageTxt(l)}</span></span>
   </div>`;
 }
@@ -754,6 +873,7 @@ function renderDetail(id) {
         ${(l.flags || []).length ? `<div class="flags">${l.flags.map(f => `<span class="tag ${f.penalty >= 2 ? 'removed' : ''}">${esc(f.label)}</span>`).join('')}</div>` : ''}
         ${(l.priceHistory || []).length > 1 ? `<div class="small"><b>Rent history:</b> ${l.priceHistory.map(([d, p]) => `${esc(d)} ${fmtEur(p)}`).join(' → ')}</div>` : ''}
       </section>
+      ${compareCard(l)}
       ${scoreCard(l)}
       ${l.description ? `<section class="card"><h2>Description</h2><p class="desc">${esc(l.description)}</p></section>` : ''}
     </div>
@@ -1037,11 +1157,11 @@ function routeView() {
   if (view === 'listings') renderTable();
   if (view === 'municipalities') renderMunicipalities();
   if (view === 'detail') renderDetail(decodeURIComponent(h.slice(9)));
-  if (view === 'data') { renderData(); renderWeights(); renderTravel(); }
+  if (view === 'data') { renderData(); renderWeights(); renderTravel(); renderHomeCard(); }
 }
 function renderAll() {
   invalidate();
-  renderControls(); drawStations(); renderList(); renderDetailCard(); renderQuick(); renderPops();
+  renderControls(); drawStations(); drawHome(); renderList(); renderDetailCard(); renderQuick(); renderPops();
   if (!$('#view-listings').hidden) renderTable();
   if (!$('#view-detail').hidden) renderDetail(decodeURIComponent(location.hash.slice(9)));
 }
@@ -1163,6 +1283,7 @@ async function boot(reloadOnly = false) {
   BYCODE = Object.fromEntries(STATIONS.map(s => [s.code, s]));
   drawDestination();
   if (!reloadOnly) { SHOPS = await fetch('/api/supermarkets').then(r => r.json()); drawShops(); drawParks(); }
+  await loadHome();
   await loadAreas();
   if (!reloadOnly) routeView();
   setTimeout(() => map.invalidateSize(), 300);
