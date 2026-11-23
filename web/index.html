@@ -94,6 +94,8 @@
       <label class="check"><input type="checkbox" id="lyrShops"> Supermarkets</label>
       <label class="check"><input type="checkbox" id="lyrParks"> Parks</label>
       <label class="check"><input type="checkbox" id="lyrListings" checked> Listings</label>
+      <label class="check"><input type="checkbox" id="lyrWalkFrom"> Walking times from a clicked place</label>
+      <label class="check"><input type="checkbox" id="lyrRoutes"> Walking routes from a clicked home</label>
       <label class="check"><input type="checkbox" id="lyrGrey"> Grey background map</label>
       <span class="hint" id="areaStats"></span>
     </section>
@@ -101,6 +103,7 @@
 
   <main class="mapwrap">
     <div id="map"></div>
+    <div class="walknote" id="walkNote" role="status" hidden></div>
     <button class="edge left" id="toggleLeft" aria-label="Hide the criteria panel" title="Hide or show the criteria">‹</button>
     <button class="edge right" id="toggleRight" aria-label="Hide the listing panel" title="Hide or show the listings">›</button>
     <div class="detailcard" id="detailCard" hidden></div>

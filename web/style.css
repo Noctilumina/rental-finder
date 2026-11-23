@@ -290,3 +290,18 @@ input.custom{border-color:var(--accent);background:var(--accent-bg)}
   background:linear-gradient(90deg,var(--accent-bg) var(--p,0%),var(--panel) var(--p,0%));border-color:var(--accent)}
 #refreshListingsTop.busy .jobtxt{font-weight:600;color:var(--accent-dark)}
 #refreshListingsTop.busy .jobsub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+
+/* ---- walking from a clicked place ---- */
+.walknote{position:absolute;left:50%;top:10px;transform:translateX(-50%);z-index:700;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);animation:fadeIn .2s ease-out;max-width:80%}
+.walklabel{background:rgba(255,255,255,.92);border:1px solid #0077BB;color:#0b2540;font-size:11px;padding:1px 6px;border-radius:4px;box-shadow:none}
+.walklabel::before{display:none}
+/* the dots drift very slowly along the route, towards the place */
+.walkroute{animation:walkdrift 5s linear infinite}
+@keyframes walkdrift{to{stroke-dashoffset:-16}}
+.sw.walkroute{width:18px;height:0;border-top:3px dotted #0077BB;align-self:center;animation:none}
+.leaflet-pane.fadein{animation:fadeIn .45s ease-out}
+.nearby{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.nearby>div{width:100%}
+.near{font-size:12px;display:inline-flex;align-items:center;gap:4px}
+.near .kind{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.opendetail{display:inline-block;margin-top:8px;font-size:13px;font-weight:500}

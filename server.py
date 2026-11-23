@@ -451,6 +451,57 @@ def api_put_travel(body: dict = Body(...)):
         raise HTTPException(400, "minutes and speeds must be numbers")
 
 
+@lru_cache(maxsize=2)
+def walk_places(_v=None):
+    """Stations, supermarkets, parks and the destination as candidates for walking routes (RD metres)."""
+    out = []
+    for st in stations().get("stations", []):
+        x, y = to_rd.transform(st["lon"], st["lat"])
+        out.append({"kind": "station", "name": st["name"], "id": st["code"], "x": x, "y": y})
+    for s in supermarkets():
+        x, y = to_rd.transform(s["lon"], s["lat"])
+        out.append({"kind": "shop", "name": s.get("name") or s.get("brand") or "Supermarket", "x": x, "y": y})
+    for p in parks():
+        geom = shapely.geometry.shape(p["geometry"]) if p.get("geometry") else None
+        if geom is None:
+            continue
+        ring = shapely.get_coordinates(shapely.segmentize(geom.boundary, 0.0004))  # a point every ~40 m along the edge
+        ex, ey = to_rd.transform(ring[:, 0], ring[:, 1])
+        x, y = to_rd.transform(p["lon"], p["lat"])
+        out.append({"kind": "park", "name": p.get("name") or f"Park ({p.get('ha')} ha)", "x": x, "y": y,
+                    "lat": p["lat"], "lon": p["lon"], "edge": np.column_stack([ex, ey])[::1]})
+    d = (meta().get("destination") or {})
+    if d.get("lat"):
+        x, y = to_rd.transform(d["lon"], d["lat"])
+        out.append({"kind": "dest", "name": "Lucas Gasselstraat 2", "x": x, "y": y})
+    return out, cKDTree(np.array([[p["x"], p["y"]] for p in out])) if out else None
+
+
+@app.get("/api/walkfrom")
+def api_walkfrom(lat: float, lon: float, walk: int = 15, shop: int = 15, park: int = PARK_ANY, destwalk: int = 0,
+                 iso: bool = True, routes: bool = True):
+    """Walking-time colours around a place and walking routes to what's within your slider limits nearby."""
+    import walkfrom
+    if not walkfrom.available():
+        return {"available": False}
+    g = grid()
+    cell = g["cell"] if g is not None else 50
+    speed = scoring.travel_settings()["speeds"]["walk"] * 1000 / 60
+    px, py = to_rd.transform(lon, lat)
+    limits = {}
+    if routes:
+        limits = {"station": walk, "shop": shop, "park": park if park < PARK_ANY else 15}
+        if destwalk:
+            limits["dest"] = destwalk
+    places, tree = walk_places(version())
+    reach = max([walkfrom.ISO_MIN if iso else 0] + list(limits.values())) * speed
+    near = [places[i] for i in tree.query_ball_point([px, py], reach)] if (tree is not None and limits) else []
+    res = walkfrom.walk_from(px, py, speed, cell, near, to_wgs, union_cells, to_geojson, limits, iso=iso)
+    if res is None:
+        return {"available": False}
+    return {"available": True, **res}
+
+
 def home_view():
     """Your current home with the same travel facts and score a listing gets (any station within an hour's walk)."""
     h = home.get()

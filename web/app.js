@@ -11,7 +11,7 @@ const PARK_ANY = 30;
 // ---------- state (persisted per browser) ----------
 const DEFAULTS = {
   walk: 15, destWalk: 30, shop: 15, park: PARK_ANY, train: 30, direct: true, dest: 'lg', lastMode: 'bike', day: 'wk', hour: 14,
-  lyrAreas: true, lyrHeat: false, lyrStations: true, lyrShops: false, lyrParks: false, lyrListings: true, lyrGrey: false, other: true,
+  lyrAreas: true, lyrHeat: false, lyrStations: true, lyrShops: false, lyrParks: false, lyrListings: true, lyrGrey: false, lyrWalkFrom: true, lyrRoutes: true, other: true,
   sort: 'score', listW: 340, sel: null, leftOpen: true, rightOpen: true, dups: false, legend: false,
   f: { rentMin: '', rentMax: '', rentIncl: 'any', m2: '', rooms: '', beds: '', label: 'any', interior: 'any',
        avail: '', listed: 'any', pets: false, gm: [], newOnly: false, minScore: '', ppm2Max: '', list: 'active', state: 'current' },
@@ -268,9 +268,10 @@ pinLayer.on('clusterclick', e => {
   else S.sel = { kind: 'group', ids, x: map.mouseEventToContainerPoint(e.originalEvent).x };
   renderDetailCard();
 });
-map.on('click', () => {  // click anywhere else: back to the full list, close the card
+map.on('click', () => {  // click anywhere else: back to the full list, close the card, back to the areas
   if (GROUP) { GROUP = null; renderCards(); }
   if (S.sel) { select(null); drawStations(); }
+  clearWalk();
 });
 
 function drawStations() {
@@ -290,7 +291,12 @@ function drawStations() {
       { permanent: selected, direction: 'right', offset: [8, 0], className: 'st-label' + (ok ? '' : ' off') });
     m.on('mouseover', e => { if (fullMap()) showHover({ kind: 'station', id: st.code, x: e.containerPoint?.x }); });
     m.on('mouseout', () => { if (fullMap()) hideHoverSoon(); });
-    m.on('click', e => { HOVER = null; select(S.sel?.id === st.code ? null : { kind: 'station', id: st.code, x: e.containerPoint?.x }); drawStations(); });
+    m.on('click', e => {
+      HOVER = null;
+      const off = S.sel?.id === st.code;
+      select(off ? null : { kind: 'station', id: st.code, x: e.containerPoint?.x }); drawStations();
+      off ? clearWalk() : showWalkFrom({ lat: st.lat, lon: st.lon, label: st.name, kind: 'station', id: st.code });
+    });
     stationLayer.addLayer(m);
   }
 }
@@ -305,7 +311,8 @@ function drawDestination() {
   destMarker = L.marker([d.lat, d.lon], {
     pane: 'dest', keyboard: false,
     icon: L.divIcon({ className: 'dest-icon', html: DEST_SVG, iconSize: [22, 22], iconAnchor: [11, 11] }),
-  }).bindTooltip(`<b>Lucas Gasselstraat 2</b><br><span class="muted">Rosmalen · destination</span>`, { direction: 'top', offset: [0, -10] }).addTo(map);
+  }).bindTooltip(`<b>Lucas Gasselstraat 2</b><br><span class="muted">Rosmalen · destination</span>`, { direction: 'top', offset: [0, -10] })
+    .on('click', e => { L.DomEvent.stopPropagation(e); showWalkFrom({ lat: d.lat, lon: d.lon, label: 'Lucas Gasselstraat 2', kind: 'dest' }); }).addTo(map);
 }
 // ---------- your current home ----------
 const HOME_SVG = '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path fill="currentColor" d="M8 1.5 1 7.4l1 1.2 1-.8V14h4v-4h2v4h4V7.8l1 .8 1-1.2z"/></svg>';
@@ -328,7 +335,8 @@ function drawHome() {
   homeMarker = L.marker([h.lat, h.lon], {
     pane: 'dest', keyboard: false,
     icon: L.divIcon({ className: 'home-icon', html: HOME_SVG, iconSize: [22, 22], iconAnchor: [11, 11] }),
-  }).bindTooltip(`<b>Your current home</b><br>${esc(h.label)}${r ? `<br><span class="muted">${r.min} min to ${destName()} at ${hh(S.hour)}</span>` : ''}`, { direction: 'top', offset: [0, -10] }).addTo(map);
+  }).bindTooltip(`<b>Your current home</b><br>${esc(h.label)}${r ? `<br><span class="muted">${r.min} min to ${destName()} at ${hh(S.hour)}</span>` : ''}`, { direction: 'top', offset: [0, -10] })
+    .on('click', e => { L.DomEvent.stopPropagation(e); showWalkFrom({ lat: h.lat, lon: h.lon, label: 'your current home', kind: 'home', id: '__home__' }); }).addTo(map);
 }
 /** One line comparing a listing's travel time with the current home's ("6 min quicker than now"). */
 function vsNow(l) {
@@ -424,12 +432,93 @@ $('#clearHome').addEventListener('click', async () => {
   $('#homeStatus').textContent = 'Removed.';
 });
 
+// ---------- walking from a clicked place ----------
+// Click a home, station, supermarket, park or your own home: the map shows how far you get on foot from there
+// (same purple scale as door to door: light = close, dark = far), and for a home the walking routes to the
+// stations, shops, parks and Lucas Gasselstraat 2 within your slider limits. Click anywhere else to go back.
+map.createPane('walk'); map.getPane('walk').style.zIndex = 360;
+map.createPane('walkroutes'); map.getPane('walkroutes').style.zIndex = 450;
+const walkRenderer = L.svg({ pane: 'walkroutes' });  // SVG (not canvas) so the dotted lines can drift gently
+const ROUTE_COLOR = '#0077BB';  // a clear blue: well visible for people who see red poorly
+const PLACE_KIND = { station: 'Station', shop: 'Shop', park: 'Park', dest: 'Destination' };
+const walkLayer = L.geoJSON(null, { pane: 'walk', interactive: false,
+  style: f => ({ stroke: false, fillColor: BAND_COLORS[f.properties.band] || BAND_COLORS.at(-1), fillOpacity: 0.42 }) });
+const routeLayer = L.layerGroup();
+let WALK = null;  // {lat, lon, label, kind, id, data}
+let walkSeq = 0;
+async function showWalkFrom(p) {
+  const wantIso = S.lyrWalkFrom, wantRoutes = S.lyrRoutes && (p.kind === 'listing' || p.kind === 'home');
+  if (!wantIso && !wantRoutes) { clearWalk(); return; }
+  const seq = ++walkSeq;
+  WALK = { ...p, data: null, loading: true };
+  renderWalkNote();
+  const q = `lat=${p.lat.toFixed(5)}&lon=${p.lon.toFixed(5)}&walk=${S.walk}&shop=${S.shop}&park=${S.park}&destwalk=${S.destWalk}&iso=${wantIso}&routes=${wantRoutes}`;
+  const d = await fetch('/api/walkfrom?' + q).then(r => r.status === 404 ? { available: false, oldServer: true } : r.json()).catch(() => null);
+  if (seq !== walkSeq || !WALK) return;
+  WALK = { ...p, data: d, loading: false };
+  drawWalk();
+}
+function drawWalk() {
+  walkLayer.clearLayers(); routeLayer.clearLayers();
+  const d = WALK?.data;
+  if (!WALK || !d?.available) { renderWalkNote(); return; }
+  if (d.bands) {
+    map.removeLayer(areaLayer);  // the walking colours replace the areas until you click away
+    walkLayer.addData(d.bands).addTo(map);
+    fade(map.getPane('walk'));
+  }
+  for (const pl of d.places || []) {
+    const ll = pl.route;
+    if (!ll || ll.length < 2) continue;
+    L.polyline(ll, { renderer: walkRenderer, color: '#fff', weight: 6, opacity: 0.85, interactive: false }).addTo(routeLayer);
+    L.polyline(ll, { renderer: walkRenderer, color: ROUTE_COLOR, weight: 3, opacity: 1, dashArray: '1 7', lineCap: 'round', className: 'walkroute', interactive: false }).addTo(routeLayer);
+    L.circleMarker([pl.lat, pl.lon], { renderer: walkRenderer, radius: 4, color: '#fff', weight: 2, fillColor: ROUTE_COLOR, fillOpacity: 1, interactive: true })
+      .bindTooltip(`${esc(pl.name)} · ${Math.round(pl.min)} min`, { permanent: true, direction: 'right', offset: [6, 0], className: 'walklabel' })
+      .addTo(routeLayer);
+  }
+  routeLayer.addTo(map);
+  renderWalkNote();
+  renderLegend();
+  renderDetailCard();
+}
+function clearWalk() {
+  if (!WALK) return;
+  WALK = null; walkSeq++;
+  walkLayer.clearLayers(); routeLayer.clearLayers();
+  map.removeLayer(walkLayer); map.removeLayer(routeLayer);
+  if (S.lyrAreas && !map.hasLayer(areaLayer)) areaLayer.addTo(map);
+  renderWalkNote(); renderLegend(); renderDetailCard();
+}
+function renderWalkNote() {
+  const el = $('#walkNote');
+  if (!el) return;
+  if (!WALK) { el.hidden = true; return; }
+  el.hidden = false;
+  const d = WALK.data;
+  el.innerHTML = WALK.loading ? `Working out walking times from ${esc(WALK.label)}…`
+    : d?.oldServer ? 'Walking times arrive with the next start of the app (close and reopen start.cmd; a running refresh keeps going).'
+    : !d?.available ? 'Walking times need the map data to be rebuilt once (Data screen → Rebuild map data).'
+    : `On foot from <b>${esc(WALK.label)}</b>${d.places?.length ? ` · ${d.places.length} place${d.places.length > 1 ? 's' : ''} within your limits` : ''} · <a href="#" id="walkClear">back to the areas</a>`;
+}
+document.addEventListener('click', e => { if (e.target.id === 'walkClear') { e.preventDefault(); clearWalk(); } });
+/** For the map card of a home: what's within walking distance (from the walking view). */
+function nearbyHtml(l) {
+  if (!WALK || WALK.id !== l.id) return '';
+  if (WALK.loading) return '<div class="small muted">Finding what is nearby on foot…</div>';
+  const pl = WALK.data?.places || [];
+  if (!pl.length) return '';
+  return `<div class="nearby"><div class="small muted">On foot within your limits</div>${pl.map(p =>
+    `<span class="near"><span class="kind">${PLACE_KIND[p.kind] || ''}</span>${esc(p.name)} <b>${Math.round(p.min)} min</b></span>`).join('')}</div>`;
+}
+
 function drawShops() {
   shopLayer.clearLayers();
   if (!S.lyrShops) { map.removeLayer(shopLayer); return; }
   for (const s of SHOPS) {
-    L.circleMarker([s.lat, s.lon], { radius: 3.5, color: '#6D28D9', weight: 1, fillColor: '#6D28D9', fillOpacity: 0.85 })
-      .bindTooltip(esc(s.name || s.brand || 'Supermarket')).addTo(shopLayer);
+    L.circleMarker([s.lat, s.lon], { radius: 3.5, color: '#6D28D9', weight: 1, fillColor: '#6D28D9', fillOpacity: 0.85, bubblingMouseEvents: false })
+      .bindTooltip(esc(s.name || s.brand || 'Supermarket'))
+      .on('click', () => showWalkFrom({ lat: s.lat, lon: s.lon, label: s.name || s.brand || 'this supermarket', kind: 'shop' }))
+      .addTo(shopLayer);
   }
   shopLayer.addTo(map);
 }
@@ -449,7 +538,11 @@ function drawPins(list) {
     L.marker([l.lat, l.lon], { icon, zIndexOffset: hov ? 1000 : 0, keyboard: false, lid: l.id })
       .on('mouseover', e => showHover({ kind: 'listing', id: l.id, x: e.containerPoint?.x }))
       .on('mouseout', hideHoverSoon)
-      .on('click', () => { location.hash = '#listing/' + encodeURIComponent(l.id); })
+      .on('click', e => {
+        HOVER = null;
+        select({ kind: 'listing', id: l.id, x: e.containerPoint?.x });
+        showWalkFrom({ lat: l.lat, lon: l.lon, label: l.address, kind: 'listing', id: l.id });
+      })
       .addTo(pinLayer);
   });
 }
@@ -461,7 +554,11 @@ function renderLegend() {
   const btn = `<button class="legbtn" id="legendBtn" aria-expanded="${S.legend}">${S.legend ? 'Hide legend' : 'Legend'}</button>`;
   if (!S.legend) { $('#legend').innerHTML = btn; return; }
   const parts = [];
-  if (S.lyrAreas && S.lyrHeat) {
+  if (WALK?.data?.bands) {
+    const st = WALK.data.step || 5;
+    parts.push(`<span class="scale" title="Walking time from ${esc(WALK.label)} (min)">${BAND_COLORS.map((c, i) => `<span><i style="background:${c}"></i>${(i + 1) * st}</span>`).join('')} min on foot</span>`);
+    if (WALK.data.places?.length) parts.push(`<span><i class="sw walkroute"></i>Walking route</span>`);
+  } else if (S.lyrAreas && S.lyrHeat) {
     const labels = BANDS.length ? [`≤${BANDS[0]}`, ...BANDS.slice(1).map(b => `${b}`), `>${BANDS[BANDS.length - 1]}`] : [];
     parts.push(`<span class="scale" title="Typical off-peak door to door (min)">${labels.map((t, i) => `<span><i style="background:${BAND_COLORS[i]}"></i>${t}</span>`).join('')} min</span>`);
   } else if (S.lyrAreas) parts.push('<span><i class="sw area"></i>Area</span>');
@@ -573,7 +670,7 @@ function renderControls() {
   $('#lastHint').textContent = Object.entries(arr).filter(([, v]) => v).map(([c, v]) => `${names[c] || c}: ${v[S.lastMode]} min`).join(' · ');
   $$('[data-dest]').forEach(b => b.classList.toggle('on', b.dataset.dest === S.dest));
   $$('[data-day]').forEach(b => b.classList.toggle('on', b.dataset.day === S.day));
-  for (const k of ['lyrAreas', 'lyrHeat', 'lyrStations', 'lyrShops', 'lyrParks', 'lyrListings', 'lyrGrey']) $('#' + k).checked = S[k];
+  for (const k of ['lyrAreas', 'lyrHeat', 'lyrStations', 'lyrShops', 'lyrParks', 'lyrListings', 'lyrGrey', 'lyrWalkFrom', 'lyrRoutes']) $('#' + k).checked = S[k];
   $('#map').classList.toggle('greymap', !!S.lyrGrey);  // optional: only the app's own colours stand out
   $('#lyrHeat').disabled = !S.lyrAreas;
   $('#otherBody').hidden = !S.other; $('#otherChevron').textContent = S.other ? '▴' : '▾';
@@ -690,7 +787,9 @@ function renderDetailCard() {
         <div><div>Route</div><b class="small">${esc(routeText(r))}</b></div>
         <div><div>Supermarket / park</div><b>${l.shop} / ${l.park ?? '30+'} min</b></div>
         <div><div>Listed</div><b>${ageTxt(l)}</b></div>
-      </div>${barsHtml(h => listingTravel(l, h), true)}`;
+      </div>${barsHtml(h => listingTravel(l, h), true)}
+      ${nearbyHtml(l)}
+      ${pinned ? `<a class="opendetail" href="#listing/${encodeURIComponent(l.id)}">Open the full page →</a>` : ''}`;
   }
   box.innerHTML = (pinned ? `<button class="close" aria-label="Close">×</button>` : '') + html;
   box.classList.toggle('pinned', pinned);
@@ -1214,6 +1313,10 @@ $('#otherToggle').addEventListener('click', () => set({ other: !S.other }));
 for (const k of ['lyrAreas', 'lyrHeat', 'lyrStations', 'lyrListings']) $('#' + k).addEventListener('change', e => { S[k] = e.target.checked; save(); renderControls(); loadAreas(k === 'lyrListings'); });
 $('#lyrShops').addEventListener('change', e => { S.lyrShops = e.target.checked; save(); drawShops(); renderLegend(); });
 $('#lyrGrey').addEventListener('change', e => { S.lyrGrey = e.target.checked; save(); renderControls(); });
+for (const k of ['lyrWalkFrom', 'lyrRoutes']) $('#' + k).addEventListener('change', e => {
+  S[k] = e.target.checked; save();
+  if (WALK) showWalkFrom(WALK); else renderLegend();
+});
 $('#lyrParks').addEventListener('change', e => { S.lyrParks = e.target.checked; save(); drawParks().then(renderPops); renderLegend(); });
 $('#toggleLeft').addEventListener('click', () => { S.leftOpen = !S.leftOpen; save(); renderControls(); map.invalidateSize(); });
 $('#toggleRight').addEventListener('click', () => { S.rightOpen = !S.rightOpen; save(); renderControls(); map.invalidateSize(); });

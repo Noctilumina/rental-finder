@@ -21,6 +21,7 @@ GRID_NPZ = DATA / "grid.npz"
 SUPERMARKETS_JSON = DATA / "supermarkets.json"
 PARKS_JSON = DATA / "parks.json"
 NOISE_NPZ = DATA / "noise.npz"
+WALKGRAPH_NPZ = DATA / "walkgraph.npz"  # the street network, for walking times from any clicked place
 USER_JSON = DATA / "user.json"          # your stars, statuses and notes (never overwritten by a refresh)
 HISTORY_JSON = DATA / "history.json"    # first/last seen and price changes per home
 AREAS_JSON = CACHE / "areas.json"       # municipality and neighbourhood per listing location

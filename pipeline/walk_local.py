@@ -313,6 +313,7 @@ def build():
     progress("Reading streets, shops and parks", 0, 1, span=(0.35, 0.5))
     ways_ids, ways_lon, ways_lat, shops, parks, noise = read_osm(stations + [dest])
     G, x, y, u, v, L = build_graph(ways_ids, ways_lon, ways_lat)
+    save_graph(x, y, u, v, L)
     del ways_ids, ways_lon, ways_lat
     ntree = cKDTree(np.column_stack([x, y]))
 
@@ -406,7 +407,32 @@ def build():
     log(f"Grid for {len(per_station)} stations, {len(shop_items)} supermarkets, {len(park_list)} parks")
 
 
+def save_graph(x, y, u, v, L):
+    """Keeps the walking network so the app can work out walking times from any place you click."""
+    from .common import WALKGRAPH_NPZ
+    tmp = WALKGRAPH_NPZ.with_suffix(".tmp.npz")
+    np.savez(tmp, x=x.astype(np.float64), y=y.astype(np.float64), u=u.astype(np.int32), v=v.astype(np.int32),
+             L=L.astype(np.float32))
+    tmp.replace(WALKGRAPH_NPZ)
+    log(f"Saved the walking network ({len(x)} nodes) to {WALKGRAPH_NPZ.name}")
+
+
+def graph_only():
+    """Builds and saves only the walking network (no grid), e.g. after an update that started keeping it."""
+    data = read_json(STATIONS_JSON)
+    if not data:
+        raise SystemExit("Run python -m pipeline.stations first")
+    download(missing_only=True)
+    dest = geocode(DESTINATION_QUERY)
+    ways_ids, ways_lon, ways_lat, *_ = read_osm(data["stations"] + [dest])
+    _, x, y, u, v, L = build_graph(ways_ids, ways_lon, ways_lat)
+    save_graph(x, y, u, v, L)
+
+
 if __name__ == "__main__":
     if "--download" in sys.argv:
         download()
-    build()
+    if "--graph-only" in sys.argv:
+        graph_only()
+    else:
+        build()
