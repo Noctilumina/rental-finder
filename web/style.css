@@ -284,3 +284,9 @@ input.custom{border-color:var(--accent);background:var(--accent-bg)}
 .warntext{color:#b42318}
 .flab{display:flex;gap:6px;align-items:baseline;white-space:nowrap}
 .greymap .leaflet-tile-pane{filter:grayscale(1) brightness(1.03) contrast(.92)}
+
+/* top-right refresh button as a progress bar while a job runs */
+#refreshListingsTop.busy{position:relative;display:inline-flex;flex-direction:column;align-items:flex-start;gap:0;min-width:230px;max-width:340px;padding:4px 12px;line-height:1.25;text-align:left;cursor:pointer;opacity:1;
+  background:linear-gradient(90deg,var(--accent-bg) var(--p,0%),var(--panel) var(--p,0%));border-color:var(--accent)}
+#refreshListingsTop.busy .jobtxt{font-weight:600;color:var(--accent-dark)}
+#refreshListingsTop.busy .jobsub{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}

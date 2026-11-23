@@ -58,6 +58,26 @@ def is_offpeak(minute: int, weekend: bool) -> bool:
     return any(a <= m < b for a, b in OFFPEAK_WEEKDAY)
 
 
+JOB_PROGRESS = DATA / "job_progress.json"
+_progress_last = [0.0, None]
+
+
+def progress(stage, done=None, total=None, span=(0.0, 1.0)):
+    """Where a running job is, for the app's Refresh button: a stage name, 'done of total' within it, and the
+    share of the whole job finished (the stage covers `span` of the job). Written at most twice a second."""
+    import time as _t
+    frac = None if not total else max(0.0, min(1.0, (done or 0) / total))
+    overall = span[0] + (span[1] - span[0]) * (frac if frac is not None else 0.0)
+    now = _t.time()
+    if stage == _progress_last[1] and now - _progress_last[0] < 0.5 and done != total:
+        return
+    _progress_last[:] = [now, stage]
+    try:
+        write_json(JOB_PROGRESS, {"stage": stage, "done": done, "total": total, "overall": round(overall, 3), "at": now})
+    except OSError:
+        pass
+
+
 def write_json(path: Path, obj) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

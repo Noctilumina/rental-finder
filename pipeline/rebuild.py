@@ -4,7 +4,7 @@ Run:  python -m pipeline.rebuild
 
 `ensure()` builds only what is missing; a listing refresh calls it first, so a new install needs no separate step.
 """
-from .common import GRID_NPZ, META_JSON, STATIONS_JSON, SUPERMARKETS_JSON, load_grid, read_json
+from .common import GRID_NPZ, META_JSON, STATIONS_JSON, SUPERMARKETS_JSON, load_grid, progress, read_json
 from . import neighbourhoods, stations, walk_local
 
 
@@ -34,10 +34,12 @@ def ensure(log=print):
                  bar):
         log(line)
     if "timetable" in todo:
+        progress("Map data: reading the timetable", 0, 1)
         stations.build()
     if "timetable" in todo or "walking areas" in todo:
         walk_local.build()          # downloads the OpenStreetMap extracts it doesn't have yet
     if "neighbourhood figures" in todo:
+        progress("Map data: neighbourhood figures", 0, 1)
         neighbourhoods.build()
     still = missing()
     if still:
@@ -59,8 +61,12 @@ def fresh_timetable(log=print):
 
 
 if __name__ == "__main__":
+    progress("Downloading the timetable", 0, 1, span=(0.0, 0.08))
     fresh_timetable()
+    progress("Reading the timetable", 0, 1, span=(0.08, 0.15))
     stations.build()
     walk_local.download()
     walk_local.build()
+    progress("Neighbourhood figures", 0, 1, span=(0.92, 1.0))
     neighbourhoods.build()
+    progress("Done", 1, 1)

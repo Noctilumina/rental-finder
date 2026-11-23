@@ -651,10 +651,14 @@ def current_job():
         lines = jobs.JOB_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-300:]
     except OSError:
         lines = []
-    return {**j, "log": lines}
+    from pipeline.common import JOB_PROGRESS
+    prog = read_json(JOB_PROGRESS, None) if j.get("finished") is None else None
+    return {**j, "log": lines, "progress": prog}
 
 
 def run_job(name):
+    from pipeline.common import JOB_PROGRESS
+    JOB_PROGRESS.unlink(missing_ok=True)
     log = open(jobs.JOB_LOG, "w", encoding="utf-8")
     if os.name == "nt":  # own process group, not tied to the server's console window
         kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}

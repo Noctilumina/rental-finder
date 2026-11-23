@@ -25,6 +25,7 @@ from scipy.sparse import coo_matrix
 from scipy.sparse.csgraph import dijkstra
 from scipy.spatial import cKDTree
 
+from .common import progress
 from .common import (BIKE_PARK_MIN, BIKE_SPEED_M_PER_MIN, CELL_M, DATA, DESTINATION_QUERY, MAX_WALK_PARK_MIN,
                      MAX_WALK_SHOP_MIN, MAX_WALK_STATION_MIN, META_JSON, NOISE_NPZ, PARKS_JSON, RAW, STATIONS_JSON,
                      SUPERMARKETS_JSON, USER_AGENT, WALK_SPEED_M_PER_MIN, read_json, save_grid, write_json)
@@ -62,7 +63,8 @@ def log(*a):
 
 def download(missing_only=False):
     OSM_DIR.mkdir(parents=True, exist_ok=True)
-    for p in PROVINCES:
+    for i, p in enumerate(PROVINCES):
+        progress(f"Downloading map: {p}", i, len(PROVINCES), span=(0.15, 0.35))
         dest = OSM_DIR / f"{p}.osm.pbf"
         if missing_only and dest.exists():
             continue
@@ -308,6 +310,7 @@ def build():
     stations = data["stations"]
     download(missing_only=True)
     dest = geocode(DESTINATION_QUERY)
+    progress("Reading streets, shops and parks", 0, 1, span=(0.35, 0.5))
     ways_ids, ways_lon, ways_lat, shops, parks, noise = read_osm(stations + [dest])
     G, x, y, u, v, L = build_graph(ways_ids, ways_lon, ways_lat)
     del ways_ids, ways_lon, ways_lat
@@ -345,6 +348,7 @@ def build():
     # walk to each station
     per_station = {}
     for n, st in enumerate(stations, 1):
+        progress(f"Walking areas: {st['name']}", n - 1, len(stations), span=(0.5, 0.92))
         sx, sy = to_rd.transform(st["lon"], st["lat"])
         near = ntree.query_ball_point([sx, sy], STATION_SNAP_M) or [int(ntree.query([sx, sy])[1])]
         if st.get("arrival"):

@@ -27,6 +27,7 @@ import requests
 from pyproj import Transformer
 from scipy.spatial import cKDTree
 
+from pipeline.common import progress
 from pipeline.common import (CACHE, LISTINGS_JSON, MAX_WALK_SHOP_MIN, MAX_WALK_STATION_MIN, STATIONS_JSON,
                              USER_AGENT, load_grid, read_json, write_json)
 
@@ -59,7 +60,8 @@ def towns_for(stations):
     cache = read_json(TOWNS_JSON, {})
     reach_km = MAX_WALK_STATION_MIN * 5 / 60 * 0.85
     out = set()
-    for st in stations:
+    for i, st in enumerate(stations, 1):
+        progress("Finding towns near the stations", i, len(stations), span=(0.0, 0.03))
         if st["code"] not in cache:
             names = set()
             pts = [(0, 0)] + [(r * math.cos(a), r * math.sin(a)) for r in (reach_km / 3, 2 * reach_km / 3, reach_km)
@@ -321,14 +323,18 @@ def main(only_towns=None, only_sites=None):
     now = dt.datetime.now().isoformat(timespec="seconds")
     ads, seen_ads = [], set()
 
+    # share of the whole refresh per site (the town-by-town search is most of the work)
+    weights = [3 if getattr(a, "SEARCH_BY", "town") == "town" else 1 for a in adapters]
+    edges = [0.03 + 0.80 * sum(weights[:i]) / sum(weights) for i in range(len(adapters) + 1)]
     with (Browser(log=log) if needs_browser else contextlib.nullcontext()) as br:
-        for ad in adapters:
+        for a_i, ad in enumerate(adapters):
             found, kept, errors = 0, 0, []
             read_details = getattr(ad, "READ_DETAILS", True)
             by_station = getattr(ad, "SEARCH_BY", "town") == "station"
             targets = near_stations if by_station else towns
             for n, target in enumerate(targets, 1):
                 town = target["name"] if by_station else target
+                progress(f"Searching {ad.SITE}: {town}", n - 1, len(targets), span=(edges[a_i], edges[a_i + 1]))
                 try:
                     res = ad.search_station(br, target) if by_station else ad.search_town(br, town)
                 except Blocked as e:
@@ -381,6 +387,7 @@ def main(only_towns=None, only_sites=None):
                                 "error": "; ".join(errors)[:300] or None}
             log(f"{ad.SITE}: {found} listings found, {kept} inside the widest areas")
 
+        progress("Merging duplicate ads", 0, 1, span=(0.83, 0.84))
         homes = [merge(g, prev_by_ad, prev, now) for g in cluster(ads)]
         for h in homes:
             if h["id"] not in prev and legacy_first.get(addr_key(h)):
@@ -393,7 +400,8 @@ def main(only_towns=None, only_sites=None):
         by_site = {a.SITE: a for a in adapters}
         cutoff = (dt.datetime.now() - dt.timedelta(days=KEEP_REMOVED_DAYS)).isoformat()
         rechecked = 0
-        for hid, old in prev.items():
+        for k, (hid, old) in enumerate(prev.items(), 1):
+            progress("Re-checking homes not found this time", k, len(prev), span=(0.84, 0.88))
             if hid in found_ids:
                 continue
             if old.get("status") == "removed" and (old.get("removedAt") or now) < cutoff:
@@ -409,7 +417,8 @@ def main(only_towns=None, only_sites=None):
         log(f"Re-checked {rechecked} earlier homes not in today's results: "
             f"{sum(1 for h in homes if h.get('removedAt') == now)} removed, {sum(1 for h in homes if h.get('missing'))} not found")
 
-    energy = enrich.run([h for h in homes if h.get("status") != "removed"], log=log)
+    energy = enrich.run([h for h in homes if h.get("status") != "removed"], log=log, span=(0.88, 0.99))
+    progress("Saving", 1, 1, span=(0.99, 1.0))
     new = sum(1 for h in homes if h.get("firstSeen") == now)
     write_json(LISTINGS_JSON, {"updated": now, "sources": sources, "items": homes, "energy": energy,
                                "lastRefresh": {"at": now, "new": new, "ads": len(ads)}})

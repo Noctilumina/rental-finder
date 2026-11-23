@@ -8,7 +8,7 @@ import time
 
 import requests
 
-from pipeline.common import AREAS_JSON, LISTINGS_JSON, USER_AGENT, read_json, write_json
+from pipeline.common import AREAS_JSON, LISTINGS_JSON, USER_AGENT, progress, read_json, write_json
 
 from . import energy, textflags
 
@@ -66,13 +66,14 @@ def area_info(home, cache):
     return val
 
 
-def run(items, log=log, force_energy=False):
+def run(items, log=log, force_energy=False, span=(0.0, 1.0)):
     cache = read_json(AREAS_JSON, {})
     ep = energy.Lookup(log=log, force=force_energy)
     if not ep.key:
         log("No EP-Online API key (ep-online-key.txt): energy labels only from listing texts")
     n_area = n_ep = n_text = 0
     for i, h in enumerate(items, 1):
+        progress("Neighbourhoods and energy labels", i, len(items), span=span)
         if h.get("lat") is None:
             continue
         a = area_info(h, cache)

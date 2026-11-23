@@ -1134,14 +1134,49 @@ async function renderData() {
   $('#jobState').textContent = !j.name ? 'Nothing run yet' : running ? `${j.name === 'map' ? 'Rebuilding map data' : j.name === 'energy' ? 'Looking up energy labels' : 'Refreshing listings'} since ${j.started.slice(11)}` : `${j.name} finished ${j.finished.slice(11)} ${j.code === 0 ? '' : j.stopped ? '(stopped before the end)' : '(failed)'}`;
   $('#jobLog').textContent = (j.log || []).join('\n') || '—';
   $('#jobLog').scrollTop = 1e9;
-  for (const b of ['#refreshListings', '#rebuildMap', '#refreshListingsTop', '#lookupEnergy']) $(b).disabled = !!running;
+  for (const b of ['#refreshListings', '#rebuildMap', '#lookupEnergy']) $(b).disabled = !!running;  // the top button stays clickable: it opens the Data screen while busy
   if (!s.energyKey) $('#lookupEnergy').disabled = true;
   $('#lookupEnergy').title = s.energyKey ? '' : 'Save an API key first';
   $('#epKey').placeholder = s.energyKey ? 'Paste a new key to replace the saved one' : 'Paste your EP-Online API key';
-  $('#refreshListingsTop').textContent = running && j.name === 'listings' ? 'Refreshing…' : 'Refresh listings';
+  renderJobButton(j, running);
   clearTimeout(statusTimer);
-  if (running) statusTimer = setTimeout(renderData, 3000);
-  else if (j.finished && renderData.lastFinished !== j.finished) { renderData.lastFinished = j.finished; MUNI = null; await boot(true); }
+  if (running) { renderData.sawRunning = true; statusTimer = setTimeout(renderData, 3000); }
+  else if (j.finished && renderData.sawRunning) { renderData.sawRunning = false; MUNI = null; await boot(true); }  // a job just ended: load its results
+}
+/** The top-right button doubles as a progress bar while any job runs: what it's doing, how far, and roughly how long. */
+/** Progress read from the log lines, for jobs that don't report it themselves (e.g. started by older code). */
+function progressFromLog(j) {
+  for (const line of (j.log || []).slice().reverse()) {
+    let m = /\d\d:\d\d:\d\d (\S+) (.+?) \((\d+)\/(\d+)\):/.exec(line);
+    if (m) {
+      const [, site, town, n, t] = m, f = +n / +t;
+      const span = site === 'Vesteda' ? [0.63, 0.83] : [0.03, 0.63];
+      return { stage: `Searching ${site}: ${town}`, done: +n, total: +t, overall: span[0] + (span[1] - span[0]) * f };
+    }
+    if ((m = /enriched (\d+)\/(\d+)/.exec(line))) return { stage: 'Neighbourhoods and energy labels', done: +m[1], total: +m[2], overall: 0.88 + 0.11 * m[1] / m[2] };
+    if ((m = /\[(\d+)\/(\d+)\] (.+?):/.exec(line))) return { stage: `Walking areas: ${m[3]}`, done: +m[1], total: +m[2], overall: 0.5 + 0.42 * m[1] / m[2] };
+  }
+  return null;
+}
+function renderJobButton(j, running) {
+  const btn = $('#refreshListingsTop');
+  const p = running ? (j.progress || progressFromLog(j)) : null;
+  btn.classList.toggle('busy', !!running);
+  if (!running) { btn.textContent = 'Refresh listings'; btn.style.removeProperty('--p'); btn.title = ''; return; }
+  const what = j.name === 'map' ? 'Rebuilding map' : j.name === 'energy' ? 'Energy labels' : 'Refreshing';
+  const pct = p?.overall != null ? Math.round(p.overall * 100) : null;
+  let eta = '';
+  if (pct >= 3 && j.started) {  // rough time left from the pace so far
+    const spent = (Date.now() - new Date(j.started.replace(' ', 'T')).getTime()) / 60000;
+    const left = spent * (100 - pct) / pct;
+    if (isFinite(left) && left > 0) eta = left < 1 ? ' · <1 min left' : left < 90 ? ` · ~${Math.round(left)} min left` : ` · ~${(left / 60).toFixed(1)} h left`;
+  }
+  btn.innerHTML = `<span class="jobtxt">${what}${pct != null ? ` ${pct}%` : '…'}</span><span class="jobsub">${esc(p?.stage || 'Starting')}${p?.total ? ` (${p.done}/${p.total})` : ''}${eta}</span>`;
+  btn.style.setProperty('--p', (pct ?? 0) + '%');
+  btn.title = `${p?.stage || ''}${p?.total ? ` (${p.done} of ${p.total})` : ''}. Details on the Data screen.`;
+  btn.setAttribute('aria-label', `${what}, ${pct ?? 0} percent: ${p?.stage || 'starting'}`);
+  const st = $('#jobState');
+  if (st && p) st.textContent += ` · ${pct}% · ${p.stage}${p.total ? ` (${p.done}/${p.total})` : ''}`;
 }
 async function startJob(name) {
   const r = await fetch('/api/refresh/' + name, { method: 'POST' });
@@ -1258,7 +1293,7 @@ $('#saveKey').addEventListener('click', async () => {
 });
 $('#epKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveKey').click(); });
 
-$('#refreshListingsTop').addEventListener('click', () => startJob('listings'));
+$('#refreshListingsTop').addEventListener('click', () => { if ($('#refreshListingsTop').classList.contains('busy')) location.hash = '#data'; else startJob('listings'); });
 $('#rebuildMap').addEventListener('click', () => { if (confirm('Rebuild map and timetable data? This downloads the timetable and map extracts again and takes a few minutes.')) startJob('map'); });
 
 // drag the listing panel's left edge
@@ -1291,4 +1326,4 @@ async function boot(reloadOnly = false) {
   if (!reloadOnly) routeView();
   setTimeout(() => map.invalidateSize(), 300);
 }
-boot();
+boot().then(() => renderData());  // also shows a job that is already running, on every page
