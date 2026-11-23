@@ -154,7 +154,7 @@ def direct_minutes(dd_m, last):
 
 
 # ---------- areas ----------
-BANDS = [20, 30, 40, 50, 60, 75]
+BANDS = [20, 30, 40, 50, 60]
 
 
 def to_geojson(geom, cell):

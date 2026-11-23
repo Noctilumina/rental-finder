@@ -236,17 +236,18 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 map.createPane('areas'); map.getPane('areas').style.zIndex = 350;
 map.createPane('parks'); map.getPane('parks').style.zIndex = 340;
 // colour-blind-safe sequential scale (viridis): short trips light, long trips dark
-// door to door: one hue, darker = quicker (fast homes stand out; slow ones fade into the map)
-const BAND_COLORS = ['#0d366b', '#184f95', '#2a78d6', '#5598e7', '#86b6ef', '#b7d3f6', '#cde2fb'];
+// door to door: one purple hue, light = close by, dark = far away. Only lightness changes, so it reads the same
+// for colour-blind users; checked for even, clearly visible steps.
+const BAND_COLORS = ['#9189e3', '#7a73c6', '#635dab', '#4e4990', '#393475', '#26215c'];
 const DEST_WALK_COLOR = '#C2410C';
 const bandOf = min => { const i = BANDS.findIndex(b => min <= b); return i < 0 ? BANDS.length : i; };
 const areaLayer = L.geoJSON(null, {
   pane: 'areas',
   style: f => f.properties.kind === 'band'
-    ? { stroke: false, fillColor: BAND_COLORS[f.properties.band] || BAND_COLORS.at(-1), fillOpacity: 0.62 }
+    ? { stroke: false, fillColor: BAND_COLORS[f.properties.band] || BAND_COLORS.at(-1), fillOpacity: 0.7 }
     : f.properties.kind === 'destwalk'
       ? { color: DEST_WALK_COLOR, weight: 2.5, dashArray: '7 5', fill: false, interactive: false }
-      : { color: S.lyrHeat ? '#0d366b' : '#0F766E', weight: S.lyrHeat ? 1 : 2, fillColor: '#0F766E', fillOpacity: S.lyrHeat ? 0 : 0.28 },
+      : { color: S.lyrHeat ? '#26215c' : '#0F766E', weight: S.lyrHeat ? 1 : 2, fillColor: '#0F766E', fillOpacity: S.lyrHeat ? 0 : 0.28 },
 }).addTo(map);
 const stationLayer = L.layerGroup().addTo(map);
 const shopLayer = L.layerGroup();
