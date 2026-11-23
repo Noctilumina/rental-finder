@@ -1173,7 +1173,7 @@ function renderJobButton(j, running) {
   }
   btn.innerHTML = `<span class="jobtxt">${what}${pct != null ? ` ${pct}%` : '…'}</span><span class="jobsub">${esc(p?.stage || 'Starting')}${p?.total ? ` (${p.done}/${p.total})` : ''}${eta}</span>`;
   btn.style.setProperty('--p', (pct ?? 0) + '%');
-  btn.title = `${p?.stage || ''}${p?.total ? ` (${p.done} of ${p.total})` : ''}. Details on the Data screen.`;
+  btn.title = `${p?.stage || ''}${p?.total ? ` (${p.done} of ${p.total})` : ''}. Click to see the log.`;
   btn.setAttribute('aria-label', `${what}, ${pct ?? 0} percent: ${p?.stage || 'starting'}`);
   const st = $('#jobState');
   if (st && p) st.textContent += ` · ${pct}% · ${p.stage}${p.total ? ` (${p.done}/${p.total})` : ''}`;
@@ -1293,7 +1293,15 @@ $('#saveKey').addEventListener('click', async () => {
 });
 $('#epKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('#saveKey').click(); });
 
-$('#refreshListingsTop').addEventListener('click', () => { if ($('#refreshListingsTop').classList.contains('busy')) location.hash = '#data'; else startJob('listings'); });
+// while a job runs, the button takes you to its log on the Data screen
+function showJobLog() {
+  if (location.hash !== '#data') location.hash = '#data';
+  requestAnimationFrame(() => setTimeout(() => {
+    $('#jobLog').closest('section').scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+    $('#jobLog').scrollTop = 1e9;  // newest lines
+  }, 60));
+}
+$('#refreshListingsTop').addEventListener('click', () => { if ($('#refreshListingsTop').classList.contains('busy')) showJobLog(); else startJob('listings'); });
 $('#rebuildMap').addEventListener('click', () => { if (confirm('Rebuild map and timetable data? This downloads the timetable and map extracts again and takes a few minutes.')) startJob('map'); });
 
 // drag the listing panel's left edge
