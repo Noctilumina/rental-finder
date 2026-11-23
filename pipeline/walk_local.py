@@ -364,7 +364,16 @@ def build():
         per_station[st["code"]] = (gx[keep].astype(np.int64) * 1_000_000 + gy[keep], np.round(t[keep] * 10).astype(np.int16))
         log(f"[{n}/{len(stations)}] {st['name']}: {int(keep.sum())} cells")
 
-    ckey = np.unique(np.concatenate([k for k, _ in per_station.values()]))
+    # cells within walking reach of the destination itself (homes there need no train)
+    gx, gy = np.meshgrid(np.arange(int((dx - ST_M) // CELL_M), int((dx + ST_M) // CELL_M) + 1),
+                         np.arange(int((dy - ST_M) // CELL_M), int((dy + ST_M) // CELL_M) + 1))
+    gx, gy = gx.ravel(), gy.ravel()
+    c = np.column_stack([(gx + 0.5) * CELL_M, (gy + 0.5) * CELL_M])
+    near_dest = dd_tree.values(c) <= ST_M
+    dest_keys = gx[near_dest].astype(np.int64) * 1_000_000 + gy[near_dest]
+    log(f"{int(near_dest.sum())} cells within {MAX_WALK_STATION_MIN} min walk of the destination")
+
+    ckey = np.unique(np.concatenate([k for k, _ in per_station.values()] + [dest_keys]))
     centres = np.column_stack([(ckey // 1_000_000 + 0.5) * CELL_M, (ckey % 1_000_000 + 0.5) * CELL_M])
     log(f"{len(ckey)} cells in all; supermarket, park and destination distances per cell")
     to10 = lambda m: np.where(np.isfinite(m), np.round(m / WALK_SPEED_M_PER_MIN * 10), 9999).astype(np.int16)

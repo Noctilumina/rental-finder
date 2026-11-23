@@ -10,7 +10,6 @@ import subprocess
 import sys
 import threading
 import time
-from collections import deque
 from functools import lru_cache
 
 import numpy as np
@@ -154,7 +153,7 @@ def direct_minutes(dd_m, last):
 
 
 # ---------- areas ----------
-BANDS = [30, 35, 40, 45, 50, 55, 60, 70, 80, 90]
+BANDS = [20, 30, 40, 50, 60, 75]
 
 
 def to_geojson(geom, cell):
@@ -168,8 +167,15 @@ def union_cells(keys, cell):
     return shapely.coverage_union_all(shapely.box(ix * cell, iy * cell, (ix + 1) * cell, (iy + 1) * cell))
 
 
+def dest_walk_cells(g, destwalk):
+    """Cells within `destwalk` minutes' walk of Lucas Gasselstraat 2 (at your walking speed)."""
+    if not destwalk:
+        return np.zeros(len(g["ckey"]), bool)
+    return direct_minutes(g["dd"], "walk") <= destwalk
+
+
 @lru_cache(maxsize=128)
-def areas(walk, shop, park, train, direct, dest, last, heat, _v=None):
+def areas(walk, shop, park, train, direct, dest, last, heat, destwalk=0, _v=None):
     g = grid()
     if g is None:
         return {"type": "FeatureCollection", "features": []}, 0, {}
@@ -187,9 +193,14 @@ def areas(walk, shop, park, train, direct, dest, last, heat, _v=None):
             td = typical_door(s, dest, last, mode)
             if td is not None:
                 np.minimum.at(best, idx[m], t[m] / 10 + td)
-    sel &= g["sm"] <= shop * 10
+    near_dest = dest_walk_cells(g, destwalk)
+    if heat and near_dest.any():
+        np.minimum.at(best, np.nonzero(near_dest)[0], direct_minutes(g["dd"][near_dest], "walk").astype(np.float32))
+    ok = g["sm"] <= shop * 10
     if park < PARK_ANY:
-        sel &= g["pk"] <= park * 10
+        ok &= g["pk"] <= park * 10
+    sel = (sel | near_dest) & ok
+    near_dest &= ok
     keys = ckey[sel]
     n = int(len(keys))
     feats = []
@@ -222,6 +233,11 @@ def areas(walk, shop, park, train, direct, dest, last, heat, _v=None):
         if outline is not None:
             feats.insert(0, {"type": "Feature", "properties": {"kind": "outline", "cells": n, "km2": round(n * cell * cell / 1e6, 1)},
                              "geometry": to_geojson(outline, cell * f)})
+        if near_dest.any():
+            dk = ckey[near_dest]
+            dk = np.unique((dk // 1_000_000 // f) * 1_000_000 + (dk % 1_000_000) // f)
+            feats.append({"type": "Feature", "properties": {"kind": "destwalk", "minutes": destwalk},
+                          "geometry": to_geojson(union_cells(dk, cell * f), cell * f)})
     brands = {}
     shops = supermarkets()
     if shops and n:
@@ -284,7 +300,7 @@ def lookup(lats, lons, train, direct):
 
 
 @lru_cache(maxsize=64)
-def located(walk, shop, park, train, direct, dest, last, _v=None):
+def located(walk, shop, park, train, direct, dest, last, destwalk=0, _v=None):
     items = listings_data()["items"]
     pts = [i for i, it in enumerate(items) if it.get("lat") is not None]
     if not pts or grid() is None:
@@ -295,12 +311,18 @@ def located(walk, shop, park, train, direct, dest, last, _v=None):
     tds = np.array([typical_door(by[c], dest, last, mode) if typical_door(by[c], dest, last, mode) is not None else 999 for c in codes])
     out = {}
     ok = (sm <= shop) & ((pk <= park) | (park >= PARK_ANY))
+    walk_dest = direct_minutes(dd, "walk")
     for r, i in enumerate(pts):
         if not ok[r]:
             continue
         w = W[r]
         cand = np.nonzero(w <= walk)[0]
+        wd = round(float(walk_dest[r])) if np.isfinite(walk_dest[r]) else None
         if not len(cand):
+            if destwalk and wd is not None and walk_dest[r] <= destwalk:  # walking distance from the office: no train needed
+                out[items[i]["id"]] = {"station": None, "walk": None, "options": [], "walkDest": wd, "nearDest": True,
+                                       "shop": round(float(sm[r])), "park": None if not np.isfinite(pk[r]) else round(float(pk[r])),
+                                       "destM": round(float(dd[r]))}
             continue
         order = cand[np.argsort(w[cand] + tds[cand])]
         best = order[0]
@@ -310,7 +332,8 @@ def located(walk, shop, park, train, direct, dest, last, _v=None):
         out[items[i]["id"]] = {"station": codes[best], "walk": round(float(w[best])),
                                "options": [[codes[j], round(float(w[j]), 1)] for j in opts],
                                "shop": round(float(sm[r])), "park": None if not np.isfinite(pk[r]) else round(float(pk[r])),
-                               "destM": None if not np.isfinite(dd[r]) else round(float(dd[r]))}
+                               "destM": None if not np.isfinite(dd[r]) else round(float(dd[r])),
+                               "walkDest": wd, "nearDest": bool(destwalk and wd is not None and walk_dest[r] <= destwalk)}
     return out
 
 
@@ -360,8 +383,8 @@ def api_stations():
 
 @app.get("/api/areas")
 def api_areas(walk: int = 15, shop: int = 15, park: int = PARK_ANY, train: int = 30, direct: bool = True,
-              dest: str = "lg", last: str = "bike", heat: bool = False):
-    fc, n, brands = areas(walk, shop, park, train, direct, dest, last, heat, version())
+              dest: str = "lg", last: str = "bike", heat: bool = False, destwalk: int = 0):
+    fc, n, brands = areas(walk, shop, park, train, direct, dest, last, heat, destwalk, version())
     return JSONResponse({"areas": fc, "stations": list(qualifying(train, direct)), "cells": n, "shopBrands": brands,
                          "bands": BANDS})
 
@@ -391,9 +414,9 @@ def public_item(it, loc, sc, user):
 
 @app.get("/api/listings")
 def api_listings(walk: int = 15, shop: int = 15, park: int = PARK_ANY, train: int = 30, direct: bool = True,
-                 dest: str = "lg", last: str = "bike", dups: bool = False):
+                 dest: str = "lg", last: str = "bike", dups: bool = False, destwalk: int = 0):
     data = listings_data()
-    loc = located(walk, shop, park, train, direct, dest, last, version())
+    loc = located(walk, shop, park, train, direct, dest, last, destwalk, version())
     sc = scored(version())
     user = user_state()
     out = []
@@ -486,7 +509,7 @@ def place_name(lat, lon):
 
 @app.get("/api/point")
 def api_point(lat: float, lon: float, walk: int = 15, shop: int = 15, park: int = PARK_ANY, train: int = 30,
-              direct: bool = True, dest: str = "lg", last: str = "bike"):
+              direct: bool = True, dest: str = "lg", last: str = "bike", destwalk: int = 0):
     out = {"place": place_name(lat, lon)}
     if grid() is not None:
         codes, W, sm, pk, dd = lookup([lat], [lon], train, direct)
@@ -500,12 +523,18 @@ def api_point(lat: float, lon: float, walk: int = 15, shop: int = 15, park: int 
                              "door": None if td is None else round(float(W[0, j]) + td)})
         opts.sort(key=lambda o: o["walk"])
         direct_door = float(direct_minutes(dd, last)[0]) if dest == "lg" else math.inf
+        walk_dest = float(direct_minutes(dd, "walk")[0])
+        near_dest = bool(destwalk and walk_dest <= destwalk)
+        if dest == "lg":
+            direct_door = min(direct_door, walk_dest)
         doors = [o["door"] for o in opts if o["door"] is not None and o["walk"] <= walk] + [direct_door]
         out.update({"stations": opts[:3], "shop": None if not np.isfinite(sm[0]) else round(float(sm[0])),
                     "park": None if not np.isfinite(pk[0]) else round(float(pk[0])),
                     "direct": None if not np.isfinite(direct_door) else round(direct_door),
                     "door": None if not np.isfinite(min(doors)) else round(min(doors)),
-                    "inside": bool(any(o["walk"] <= walk for o in opts) and sm[0] <= shop and (park >= PARK_ANY or pk[0] <= park))})
+                    "walkDest": None if not np.isfinite(walk_dest) else round(walk_dest), "nearDest": near_dest,
+                    "inside": bool((near_dest or any(o["walk"] <= walk for o in opts)) and sm[0] <= shop
+                                   and (park >= PARK_ANY or pk[0] <= park))})
     return out
 
 
@@ -543,20 +572,57 @@ def api_municipalities():
 
 
 # ---------- background jobs (refresh buttons) ----------
-JOBS = {"listings": [sys.executable, "-m", "listings.refresh"],
-        "map": [sys.executable, "-m", "pipeline.rebuild"],
-        "energy": [sys.executable, "-m", "listings.enrich", "--force"]}
-job = {"name": None, "started": None, "finished": None, "code": None, "log": deque(maxlen=300)}
+# A job runs as its own process (jobs.py) writing to data/job.log and data/job.json, so it keeps going when the
+# server restarts; any server reads its state back from those files.
+import jobs  # noqa: E402
+
 job_lock = threading.Lock()
 
 
+def pid_alive(pid):
+    try:
+        import psutil
+        p = psutil.Process(int(pid))
+        return p.status() != psutil.STATUS_ZOMBIE
+    except ImportError:
+        if os.name == "nt":
+            return True  # can't tell without psutil; assume it still runs
+        try:
+            os.kill(int(pid), 0)
+            return True
+        except OSError:
+            return False
+    except Exception:
+        return False
+
+
+def current_job():
+    j = read_json(jobs.JOB_JSON, {}) or {}
+    if not j.get("name"):
+        return {"name": None, "started": None, "finished": None, "code": None, "log": []}
+    if j.get("finished") is None and not pid_alive(j.get("pid", 0)):
+        j.update(finished=time.strftime("%Y-%m-%d %H:%M:%S"), code=None, stopped=True)  # killed before it could report
+        write_json(jobs.JOB_JSON, j)
+    try:
+        lines = jobs.JOB_LOG.read_text(encoding="utf-8", errors="replace").splitlines()[-300:]
+    except OSError:
+        lines = []
+    return {**j, "log": lines}
+
+
 def run_job(name):
-    proc = subprocess.Popen(JOBS[name], cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                            text=True, encoding="utf-8", errors="replace")
-    for line in proc.stdout:
-        job["log"].append(line.rstrip())
-    job["code"] = proc.wait()
-    job["finished"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    log = open(jobs.JOB_LOG, "w", encoding="utf-8")
+    if os.name == "nt":  # own process group, not tied to the server's console window
+        kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS}
+    else:
+        kw = {"start_new_session": True}
+    proc = subprocess.Popen([sys.executable, "jobs.py", name], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL, env={**os.environ, "PYTHONUNBUFFERED": "1", "PYTHONIOENCODING": "utf-8"},
+                            **kw)
+    log.close()
+    write_json(jobs.JOB_JSON, {"name": name, "pid": proc.pid, "started": time.strftime("%Y-%m-%d %H:%M:%S"),
+                               "finished": None, "code": None})
+    threading.Thread(target=proc.wait, daemon=True).start()  # reap it (no zombie) while this server runs
 
 
 @app.post("/api/energy-key")
@@ -581,7 +647,8 @@ REFRESH_LOG = ROOT / "data" / "refresh.log"
 
 def external_refresh():
     """A listing refresh started outside the app (command line): (started, log lines) or None."""
-    if not REFRESH_LOCK.exists() or (job["name"] == "listings" and job["finished"] is None):
+    cur = read_json(jobs.JOB_JSON, {}) or {}
+    if not REFRESH_LOCK.exists() or (cur.get("name") == "listings" and cur.get("finished") is None):
         return None
     try:
         pid, started = REFRESH_LOCK.read_text(encoding="utf-8").split()
@@ -599,16 +666,15 @@ def external_refresh():
 
 @app.post("/api/refresh/{name}")
 def api_refresh(name: str):
-    if name not in JOBS:
+    if name not in jobs.JOBS:
         raise HTTPException(404)
     with job_lock:
-        if job["name"] and job["finished"] is None:
-            raise HTTPException(409, f"{job['name']} refresh is already running")
+        cur = current_job()
+        if cur["name"] and cur["finished"] is None:
+            raise HTTPException(409, f"{cur['name']} refresh is already running")
         if external_refresh():
             raise HTTPException(409, "A listing refresh is already running (started from the command line)")
-        job.update(name=name, started=time.strftime("%Y-%m-%d %H:%M:%S"), finished=None, code=None)
-        job["log"].clear()
-        threading.Thread(target=run_job, args=(name,), daemon=True).start()
+        run_job(name)
     return {"started": name}
 
 
@@ -618,7 +684,7 @@ def api_status():
     st = stations()
     from listings import energy
     ext = external_refresh()
-    j = {k: (list(v) if k == "log" else v) for k, v in job.items()}
+    j = current_job()
     if ext:
         j = {"name": "listings", "started": ext[0].replace("T", " "), "finished": None, "code": None, "log": ext[1], "external": True}
     return {"job": j,

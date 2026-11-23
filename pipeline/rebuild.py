@@ -47,8 +47,19 @@ def ensure(log=print):
     return True
 
 
+def fresh_timetable(log=print):
+    """Downloads the timetable; if the site refuses (e.g. 'too many requests'), keeps the one downloaded earlier."""
+    from .common import GTFS_ZIP
+    try:
+        stations.download()
+    except Exception as e:
+        if not GTFS_ZIP.exists():
+            raise
+        log(f"Could not download a new timetable ({e}); using the one downloaded earlier")
+
+
 if __name__ == "__main__":
-    stations.download()
+    fresh_timetable()
     stations.build()
     walk_local.download()
     walk_local.build()

@@ -10,7 +10,7 @@ const PARK_ANY = 30;
 
 // ---------- state (persisted per browser) ----------
 const DEFAULTS = {
-  walk: 15, shop: 15, park: PARK_ANY, train: 30, direct: true, dest: 'lg', lastMode: 'bike', day: 'wk', hour: 14,
+  walk: 15, destWalk: 30, shop: 15, park: PARK_ANY, train: 30, direct: true, dest: 'lg', lastMode: 'bike', day: 'wk', hour: 14,
   lyrAreas: true, lyrHeat: false, lyrStations: true, lyrShops: false, lyrParks: false, lyrListings: true, other: true,
   sort: 'score', listW: 340, sel: null, leftOpen: true, rightOpen: true, dups: false, legend: false,
   f: { rentMin: '', rentMax: '', rentIncl: 'any', m2: '', rooms: '', beds: '', label: 'any', interior: 'any',
@@ -56,30 +56,32 @@ function fromStation(st, h = S.hour, day = S.day) {
   }
   return best;
 }
-const directMin = destM => {
+const directMin = (destM, how = S.lastMode) => {
   if (destM == null) return null;
   const sp = META.destination?.speeds || { walk: 5, bike: 15, bikePark: 3 };
-  return Math.round(S.lastMode === 'walk' ? destM / (sp.walk * 1000 / 60) : destM / (sp.bike * 1000 / 60) + sp.bikePark);
+  return Math.round(how === 'walk' ? destM / (sp.walk * 1000 / 60) : destM / (sp.bike * 1000 / 60) + sp.bikePark);
 };
 /** Quickest route for a listing at hour h: via one of its stations, or straight to the destination. */
 function route(l, h = S.hour, day = S.day) {
   let best = null;
-  for (const [code, w] of (l.options || [[l.station, l.walk]])) {
+  for (const [code, w] of (l.options || (l.station ? [[l.station, l.walk]] : []))) {
     const r = fromStation(BYCODE[code], h, day);
     if (!r) continue;
     const t = Math.round(w + r.min);
     if (!best || t < best.min) best = { ...r, min: t, station: code, walk: Math.round(w) };
   }
   if (S.dest === 'lg' && l.destM != null) {
-    const d = directMin(l.destM);
-    if (!best || d <= best.min) best = { min: d, direct: true };
+    for (const how of new Set([S.lastMode, 'walk'])) {
+      const d = directMin(l.destM, how);
+      if (!best || d < best.min || (d === best.min && !best.direct)) best = { min: d, direct: true, how };
+    }
   }
   return best;
 }
 const listingTravel = (l, h, day) => route(l, h, day)?.min ?? null;
 function routeText(r) {
   if (!r) return 'no train at this hour';
-  if (r.direct) return `${S.lastMode === 'walk' ? 'walk' : 'bike'} straight there`;
+  if (r.direct) return `${r.how === 'walk' ? 'walk' : 'bike'} straight there`;
   const st = BYCODE[r.station];
   const hub = HUB_NAMES()[r.hub] || '';
   return `${r.walk} min walk to ${st?.name || ''}${st?.code === r.hub ? '' : ', train to ' + hub}${S.dest === 'lg' ? `, ${S.lastMode} ${r.last} min` : ''}`;
@@ -176,7 +178,7 @@ const SORTS = [
   ['rooms', 'Rooms: most first', (a, b) => num(b.rooms, 0) - num(a.rooms, 0)],
   ['label', 'Energy label: best first', (a, b) => LABEL_RANK(a.energyLabel) - LABEL_RANK(b.energyLabel)],
   ['travel', 'Travel time: shortest first', (a, b) => num(listingTravel(a), 1e9) - num(listingTravel(b), 1e9)],
-  ['walk', 'Walk to station: shortest first', (a, b) => a.walk - b.walk],
+  ['walk', 'Walk to station: shortest first', (a, b) => num(a.walk, 999) - num(b.walk, 999)],
 ];
 let _visible = null;
 function visibleListings() {
@@ -233,12 +235,17 @@ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
 map.createPane('areas'); map.getPane('areas').style.zIndex = 350;
 map.createPane('parks'); map.getPane('parks').style.zIndex = 340;
 // colour-blind-safe sequential scale (viridis): short trips light, long trips dark
-const BAND_COLORS = ['#FDE725', '#C2DF23', '#86D549', '#52C569', '#2AB07F', '#1E9B8A', '#25858E', '#2D708E', '#38588C', '#433E85', '#482173'];
+// door to door: one hue, darker = quicker (fast homes stand out; slow ones fade into the map)
+const BAND_COLORS = ['#0d366b', '#184f95', '#2a78d6', '#5598e7', '#86b6ef', '#b7d3f6', '#cde2fb'];
+const DEST_WALK_COLOR = '#C2410C';
+const bandOf = min => { const i = BANDS.findIndex(b => min <= b); return i < 0 ? BANDS.length : i; };
 const areaLayer = L.geoJSON(null, {
   pane: 'areas',
   style: f => f.properties.kind === 'band'
-    ? { stroke: false, fillColor: BAND_COLORS[f.properties.band] || '#482173', fillOpacity: 0.5 }
-    : { color: '#0F766E', weight: 2, fillColor: '#0F766E', fillOpacity: S.lyrHeat ? 0 : 0.28 },
+    ? { stroke: false, fillColor: BAND_COLORS[f.properties.band] || BAND_COLORS.at(-1), fillOpacity: 0.62 }
+    : f.properties.kind === 'destwalk'
+      ? { color: DEST_WALK_COLOR, weight: 2.5, dashArray: '7 5', fill: false, interactive: false }
+      : { color: S.lyrHeat ? '#0d366b' : '#0F766E', weight: S.lyrHeat ? 1 : 2, fillColor: '#0F766E', fillOpacity: S.lyrHeat ? 0 : 0.28 },
 }).addTo(map);
 const stationLayer = L.layerGroup().addTo(map);
 const shopLayer = L.layerGroup();
@@ -269,8 +276,12 @@ function drawStations() {
   if (!S.lyrStations) return;
   for (const st of STATIONS) {
     const ok = QUAL.has(st.code);
-    const m = L.circleMarker([st.lat, st.lon], { radius: ok ? 7 : 5, color: '#fff', weight: 2, fillColor: ok ? '#0F766E' : '#A3A39B', fillOpacity: 1, bubblingMouseEvents: false });
     const t = fromStation(st)?.min;
+    // with door-to-door colours on, a qualifying station wears the colour of its own time (from the platform),
+    // so the scale still reads when zoomed out and the dots cover their small walking areas
+    const heat = S.lyrAreas && S.lyrHeat && ok;
+    const fill = !ok ? '#A3A39B' : heat ? (t == null ? '#A3A39B' : BAND_COLORS[bandOf(t)]) : '#0F766E';
+    const m = L.circleMarker([st.lat, st.lon], { radius: ok ? 7 : 5, color: heat ? '#1a1a1a' : '#fff', weight: heat ? 1.5 : 2, fillColor: fill, fillOpacity: 1, bubblingMouseEvents: false });
     // no permanent labels (too busy): the name shows on hover, and stays for the selected station
     const selected = S.sel?.kind === 'station' && S.sel.id === st.code;
     m.bindTooltip(`${esc(st.name)} · ${t == null ? 'no train this hour' : t + '′'}`,
@@ -322,7 +333,10 @@ function renderLegend() {
     const labels = BANDS.length ? [`≤${BANDS[0]}`, ...BANDS.slice(1).map(b => `${b}`), `>${BANDS[BANDS.length - 1]}`] : [];
     parts.push(`<span class="scale" title="Typical off-peak door to door (min)">${labels.map((t, i) => `<span><i style="background:${BAND_COLORS[i]}"></i>${t}</span>`).join('')} min</span>`);
   } else if (S.lyrAreas) parts.push('<span><i class="sw area"></i>Area</span>');
-  parts.push('<span><i class="sw dot on"></i>Station</span>');
+  if (S.lyrAreas && S.destWalk) parts.push(`<span><i class="sw destwalk"></i>${S.destWalk} min walk to the office</span>`);
+  parts.push(S.lyrAreas && S.lyrHeat
+    ? `<span><i class="sw dot on" style="background:${BAND_COLORS[2]};box-shadow:0 0 0 1.5px #1a1a1a"></i>Station, by its time</span>`
+    : '<span><i class="sw dot on"></i>Station</span>');
   if (S.lyrParks) parts.push('<span><i class="sw park"></i>Park</span>');
   parts.push('<span><i class="sw pin star">1</i>Shortlisted</span>');
   $('#legend').innerHTML = parts.join('') + btn;
@@ -349,9 +363,11 @@ async function showHere(ll, pt) {
   const st = (r.stations || [])[0];
   const lines = [];
   if (r.inside) lines.push('<span class="badge">Inside the areas</span>');
+  if (r.nearDest) lines.push(`${r.walkDest} min walk to Lucas Gasselstraat 2: no train needed`);
   if (st) lines.push(`${st.walk} min walk to ${esc(st.name)}`);
-  else if (r.stations) lines.push('No qualifying station within an hour\'s walk');
-  if (r.door != null) lines.push(`${r.door} min door to door to ${destName()} <span class="muted">(typical off-peak${r.direct != null && r.door === r.direct ? ', ' + S.lastMode + ' straight there' : ''})</span>`);
+  else if (r.stations && !r.nearDest) lines.push('No qualifying station within an hour\'s walk');
+  const how = r.direct != null && r.door === r.direct ? (r.walkDest === r.door ? 'walk' : S.lastMode) : null;
+  if (r.door != null) lines.push(`${r.door} min door to door to ${destName()} <span class="muted">(${how ? how + ' straight there' : 'typical off-peak'})</span>`);
   lines.push(`Supermarket ${r.shop ?? '30+'} min · park ${r.park ?? '30+'} min`);
   const tip = $('#hereTip');
   tip.innerHTML = `<b>${esc(title)}</b>${sub ? `<span class="muted">${esc(sub)}</span>` : ''}${lines.map(x => `<span>${x}</span>`).join('')}`;
@@ -363,7 +379,7 @@ async function showHere(ll, pt) {
 
 // ---------- data loading ----------
 let areaTimer, areaSeq = 0;
-function q() { return `walk=${S.walk}&shop=${S.shop}&park=${S.park}&train=${S.train}&direct=${S.direct}`; }
+function q() { return `walk=${S.walk}&shop=${S.shop}&park=${S.park}&train=${S.train}&direct=${S.direct}&destwalk=${S.destWalk}`; }
 async function loadAreas(listings = true) {
   const seq = ++areaSeq;
   const [a, l] = await Promise.all([
@@ -408,6 +424,7 @@ function setCollapsed(el, collapsed) {
 function fade(el) { el.classList.remove('fadein'); void el.offsetWidth; el.classList.add('fadein'); }
 function renderControls() {
   $('#walk').value = S.walk; $('#walkOut').textContent = S.walk + ' min';
+  $('#destWalk').value = S.destWalk; $('#destWalkOut').textContent = S.destWalk ? S.destWalk + ' min' : 'Off';
   $('#shop').value = S.shop; $('#shopOut').textContent = S.shop + ' min';
   $('#park').value = S.park; $('#parkOut').textContent = S.park >= PARK_ANY ? 'Any' : S.park + ' min';
   $('#train').value = S.train; $('#trainOut').textContent = S.train + ' min';
@@ -741,7 +758,8 @@ function renderDetail(id) {
         <div class="seg" role="group" aria-label="Destination"><button data-dest="cs" class="${S.dest === 'cs' ? 'on' : ''}">Den Bosch CS</button><button data-dest="lg" class="${S.dest === 'lg' ? 'on' : ''}">Lucas Gasselstraat 2</button></div>
         <div class="seg small" role="group" aria-label="Day"><button data-day="wk" class="${S.day === 'wk' ? 'on' : ''}">Weekday</button><button data-day="sa" class="${S.day === 'sa' ? 'on' : ''}">Saturday</button><button data-day="su" class="${S.day === 'su' ? 'on' : ''}">Sunday</button></div>
         <div class="breakdown">
-          ${r?.direct ? `<div><span>${S.lastMode === 'walk' ? 'Walk' : 'Bike'} straight to Lucas Gasselstraat 2 (${(l.destM / 1000).toFixed(1)} km)</span><span>${r.min} min</span></div>` : r ? `
+          ${l.nearDest ? `<div><span><b>Within walking distance of the office: no train needed</b></span><span>${l.walkDest} min walk</span></div>` : ''}
+          ${r?.direct ? `<div><span>${r.how === 'walk' ? 'Walk' : 'Bike'} straight to Lucas Gasselstraat 2 (${(l.destM / 1000).toFixed(1)} km)</span><span>${r.min} min</span></div>` : r ? `
           <div><span>Walk to ${esc(st?.name || 'station')}</span><span>${r.walk} min</span></div>
           ${st?.code === r.hub ? '' : `<div><span>Wait + ${S.direct ? 'direct ' : ''}train to ${esc(HUB_NAMES()[r.hub] || '')} at ${hh(S.hour)}</span><span>${r.train} min</span></div>`}
           ${S.dest === 'lg' ? `<div><span>${S.lastMode === 'walk' ? 'Walk' : 'Bike'} from ${esc(HUB_NAMES()[r.hub] || '')} to Lucas Gasselstraat 2</span><span>${r.last} min</span></div>` : ''}` : '<div><span>No train at this hour</span><span>—</span></div>'}
@@ -977,7 +995,7 @@ async function renderData() {
   const action = running && last.includes('ACTION:') ? last.replace(/^.*ACTION:\s*/, '') : '';
   $('#actionBar').hidden = !action;
   $('#actionBar').textContent = action;
-  $('#jobState').textContent = !j.name ? 'Nothing run since the server started' : running ? `${j.name === 'map' ? 'Rebuilding map data' : j.name === 'energy' ? 'Looking up energy labels' : 'Refreshing listings'} since ${j.started.slice(11)}` : `${j.name} finished ${j.finished.slice(11)} ${j.code === 0 ? '' : '(failed)'}`;
+  $('#jobState').textContent = !j.name ? 'Nothing run yet' : running ? `${j.name === 'map' ? 'Rebuilding map data' : j.name === 'energy' ? 'Looking up energy labels' : 'Refreshing listings'} since ${j.started.slice(11)}` : `${j.name} finished ${j.finished.slice(11)} ${j.code === 0 ? '' : j.stopped ? '(stopped before the end)' : '(failed)'}`;
   $('#jobLog').textContent = (j.log || []).join('\n') || '—';
   $('#jobLog').scrollTop = 1e9;
   for (const b of ['#refreshListings', '#rebuildMap', '#refreshListingsTop', '#lookupEnergy']) $(b).disabled = !!running;
@@ -1016,7 +1034,7 @@ function renderAll() {
 function select(sel) { S.sel = sel; save(); renderDetailCard(); }
 function set(patch, reload = false) { Object.assign(S, patch); save(); reload ? (renderControls(), scheduleAreas()) : renderAll(); }
 
-for (const [id, key] of [['walk', 'walk'], ['shop', 'shop'], ['park', 'park'], ['train', 'train']])
+for (const [id, key] of [['walk', 'walk'], ['destWalk', 'destWalk'], ['shop', 'shop'], ['park', 'park'], ['train', 'train']])
   $('#' + id).addEventListener('input', e => set({ [key]: +e.target.value }, true));
 $('#hour').addEventListener('input', e => set({ hour: +e.target.value }));
 $('#lastMode').addEventListener('change', e => { set({ lastMode: e.target.value }); if (S.lyrHeat) scheduleAreas(false); });
