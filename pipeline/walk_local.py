@@ -12,6 +12,7 @@ Outputs: data/grid.npz, data/supermarkets.json, data/parks.json, data/noise.npz,
 Run:  python -m pipeline.walk_local [--download]
 """
 import math
+import re
 import sys
 import time
 
@@ -66,13 +67,37 @@ def download(missing_only=False):
         if missing_only and dest.exists():
             continue
         log(f"Downloading {p} extract from Geofabrik")
-        with requests.get(GEOFABRIK.format(p=p), stream=True, timeout=120, headers={"User-Agent": USER_AGENT}) as r:
-            r.raise_for_status()
-            tmp = dest.with_suffix(".part")
-            with open(tmp, "wb") as f:
-                for chunk in r.iter_content(1 << 20):
-                    f.write(chunk)
-            tmp.replace(dest)
+        for url in extract_urls(p):
+            with requests.get(url, stream=True, timeout=120, headers={"User-Agent": USER_AGENT}) as r:
+                if r.status_code == 404:
+                    # "latest" can point to today's file before Geofabrik has published it: try the day before
+                    log(f"  not available yet: {r.url.rsplit('/', 1)[-1]}")
+                    continue
+                r.raise_for_status()
+                tmp = dest.with_suffix(".part")
+                with open(tmp, "wb") as f:
+                    for chunk in r.iter_content(1 << 20):
+                        f.write(chunk)
+                tmp.replace(dest)
+                log(f"  got {r.url.rsplit('/', 1)[-1]}")
+                break
+        else:
+            if dest.exists():
+                log(f"  no {p} extract available right now; keeping the one downloaded earlier")
+            else:
+                raise RuntimeError(f"Geofabrik has no downloadable {p} extract right now; try again in an hour")
+
+
+def extract_urls(p):
+    """The 'latest' extract, then the dated ones listed on Geofabrik's page for the province, newest first."""
+    yield GEOFABRIK.format(p=p)
+    base = GEOFABRIK.format(p=p).rsplit("/", 1)[0]
+    try:
+        page = requests.get(base + "/", timeout=60, headers={"User-Agent": USER_AGENT}).text
+    except requests.RequestException:
+        return
+    for d in sorted(set(re.findall(rf"{re.escape(p)}-(\d{{6}})\.osm\.pbf", page)), reverse=True)[:5]:
+        yield f"{base}/{p}-{d}.osm.pbf"
 
 
 def geocode(query):

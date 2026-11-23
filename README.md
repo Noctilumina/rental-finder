@@ -3,20 +3,45 @@
 Local web app that finds rental homes near stations with a direct off-peak train to Den Bosch, within walking
 distance of a supermarket, and scores them. See SPEC.md for the full requirements.
 
+Runs on Windows, Linux and macOS (tested automatically on Ubuntu and macOS, see `.github/workflows/test.yml`).
+
 ## Run
 
-Double-click `start.cmd` (Windows), or run
+- **Windows:** double-click `start.cmd`.
+- **Linux / macOS:** run `./start.sh` in this folder.
 
-    %USERPROFILE%\.venvs\rental-finder\Scripts\python server.py
-
-and open http://127.0.0.1:8765. Use **Refresh listings** (top right, or the Data screen) to fetch new listings.
+Both start the server and open http://127.0.0.1:8765 in your browser. Stop it by closing the window (Windows) or
+with Ctrl+C. Use **Refresh listings** (top right, or the Data screen) to fetch new listings.
 
 ## Setup (once, on a new machine)
 
-    python -m venv %USERPROFILE%\.venvs\rental-finder
-    %USERPROFILE%\.venvs\rental-finder\Scripts\pip install -r requirements.txt
+Needs Python 3.11 or newer. The app's own data is not in the repository: after setting up, open the Data screen
+and press **Rebuild map data** (about 10 minutes), then **Refresh listings** (the first one takes an hour or more).
 
-(On Linux: `python3 -m venv ~/.venvs/rental-finder` and `~/.venvs/rental-finder/bin/pip ...`.)
+**Windows** (PowerShell):
+
+    python -m venv $env:USERPROFILE\.venvs\rental-finder
+    & $env:USERPROFILE\.venvs\rental-finder\Scripts\pip install -r requirements.txt
+
+**Linux:**
+
+    sudo apt install python3 python3-venv     # Debian/Ubuntu; Fedora: sudo dnf install python3
+    python3 -m venv ~/.venvs/rental-finder
+    ~/.venvs/rental-finder/bin/pip install -r requirements.txt
+
+**macOS** (with [Homebrew](https://brew.sh)):
+
+    brew install python
+    python3 -m venv ~/.venvs/rental-finder
+    ~/.venvs/rental-finder/bin/pip install -r requirements.txt
+
+To use a Python somewhere else, set `RF_PYTHON` to it before running `./start.sh`.
+
+**Moving to another computer:** copy `data/user.json` (your stars, statuses and notes), `data/settings.json`
+(score weights, travel times) and `ep-online-key.txt` along. On Linux and macOS the key file is readable only by you.
+
+The optional browser-based sources (see Listings) use Microsoft Edge on Windows and Google Chrome elsewhere; set
+`RF_BROWSER_CHANNEL` to pick another browser.
 
 ## Map, timetable and neighbourhood data
 
@@ -45,7 +70,7 @@ The first refresh after a change of areas reads many ad pages and can take a few
 ads. Homes that disappear are re-checked: "removed" only when the site says so.
 
 **Energy labels:** request a free key at https://apikey.ep-online.nl, then paste it on the Data screen (stored in
-`ep-online-key.txt`) and press "Look up energy labels now". Without a key, labels only come from listing texts.
+`ep-online-key.txt`) and press "Get energy labels for all listings". Without a key, labels only come from listing texts.
 
 Your stars, statuses and notes are in `data/user.json`; refreshes never change them.
 

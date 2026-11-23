@@ -1,0 +1,4 @@
+# Keep line endings right for each system's launcher, whatever machine the repo is checked out on
+* text=auto
+*.sh text eol=lf
+*.cmd text eol=crlf

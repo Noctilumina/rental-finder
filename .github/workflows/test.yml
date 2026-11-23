@@ -1,0 +1,44 @@
+# Checks that Rental finder installs and starts on Linux, macOS and Windows (no data downloads).
+name: test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: macos-latest
+            python: "3.12"
+          - os: windows-latest
+            python: "3.12"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install
+        run: pip install -r requirements.txt
+      - name: Compile all code
+        run: python -m compileall -q .
+      - name: Check the launcher script
+        if: runner.os != 'Windows'
+        run: |
+          sh -n start.sh
+          test -x start.sh
+      - name: Start the app and call every screen's API
+        run: python tests/smoke_test.py

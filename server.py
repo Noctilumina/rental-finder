@@ -4,6 +4,7 @@ Run:  python server.py        then open http://127.0.0.1:8765
 """
 import json
 import math
+import os
 import statistics
 import subprocess
 import sys
@@ -27,7 +28,7 @@ from pipeline.common import (BIKE_PARK_MIN, BIKE_SPEED_M_PER_MIN, CACHE, GRID_NP
                              META_JSON, NOISE_NPZ, PARKS_JSON, ROOT, STATIONS_JSON, SUPERMARKETS_JSON, USER_AGENT,
                              USER_JSON, WALK_SPEED_M_PER_MIN, load_grid, read_json, write_json)
 
-PORT = 8765
+PORT = int(os.environ.get("RF_PORT", 8765))
 MIN_RENT = 300
 PARK_ANY = MAX_WALK_PARK_MIN  # park slider at its maximum means "no park requirement"
 WEB = ROOT / "web"
@@ -565,7 +566,12 @@ def api_energy_key(body: dict = Body(...)):
     k = str(body.get("key") or "").strip()
     if not k or len(k) > 200 or any(c.isspace() for c in k):
         raise HTTPException(400, "That doesn't look like an API key")
-    EP_KEY_FILE.write_text(k, encoding="utf-8")
+    # on Linux/macOS only you can read the file (created that way, so it is never readable by others)
+    fd = os.open(EP_KEY_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(k)
+    if os.name != "nt":
+        os.chmod(EP_KEY_FILE, 0o600)  # also for a key file that already existed
     return {"saved": True}
 
 
