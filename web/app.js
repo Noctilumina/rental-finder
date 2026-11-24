@@ -903,7 +903,7 @@ const COLS = [
   ['star', '★', l => user(l).star ? 0 : 1, l => starBtn(l)],
   ['address', 'Address', l => l.address, l => `<a href="#listing/${encodeURIComponent(l.id)}" style="color:inherit;text-decoration:none;font-weight:500">${esc(l.address)}</a> ${warnHtml(l)}<div class="sub2">${esc(l.city || '')}${l.buurt ? ' · ' + esc(l.buurt) : ''}</div>`],
   ['gemeente', 'Municipality', l => l.gemeente || 'zz', l => esc(l.gemeente || '—')],
-  ['score', 'Score', l => num(l.score?.total, -1), l => l.score?.total != null ? `${scoreHtml(l)}<div class="sub2">top ${100 - (l.score.totalPct ?? 0)}%</div>` : '—'],
+  ['score', 'Score', l => num(l.score?.total, -1), l => l.score?.total != null ? `${scoreHtml(l)}<div class="sub2">${l.score.totalPct == null ? '' : l.score.totalPct >= 50 ? `top ${Math.max(1, 100 - l.score.totalPct)}%` : `bottom ${Math.max(1, l.score.totalPct)}%`}</div>` : '—'],
   ['rent', 'Rent', l => num(l.rent, 1e9), l => `<b>${fmtEur(l.rent)}</b> ${chgHtml(l)}`],
   ['ppm2', '€/m²', l => num(ppm2(l), 1e9), l => ppm2(l) ? '€' + ppm2(l).toFixed(1) : '—'],
   ['ppr', '€/room', l => num(ppr(l), 1e9), l => ppr(l) ? fmtEur(ppr(l)) : '—'],
